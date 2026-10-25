@@ -1,0 +1,10 @@
+{
+  "name": "hypernova",
+  "version": "1.0.0",
+  "description": "HYPERNOVA — an active 3D incremental game. Feed the core, break the scale.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "sim": "node tools/simulate.js 1 42 3600"
+  }
+}
