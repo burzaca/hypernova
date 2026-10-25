@@ -2,8 +2,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  INJECTORS, UPGRADES, STAGES, PERKS, ACHIEVEMENTS, MECHANIC_KEYS,
+  INJECTORS, UPGRADES, STAGES, PERKS, ACHIEVEMENTS, MECHANIC_KEYS, getStage, stageThreshold,
 } from '../src/core/content.js';
+import { createState, save, load, snapshot, tick, stageFor } from '../src/core/economy.js';
 
 const HEX = /^#[0-9a-f]{6}$/;
 const ID = /^[a-z][a-z0-9_]*$/;
@@ -105,4 +106,79 @@ test('achievements use legal counters', () => {
       assert.ok(Number.isFinite(a.at[k]) && a.at[k] >= 0, 'at value ' + a.id);
     }
   }
+});
+
+// ---------------------------------------------------------------- endless stages (ENDLESS.md §1)
+test('getStage returns authored stages, then generated ones forever', () => {
+  const last = STAGES.length - 1;
+  assert.equal(getStage(0), STAGES[0]);
+  assert.equal(getStage(last), STAGES[last]);
+  assert.equal(getStage(14), STAGES[14]);
+  const names = new Set(STAGES.map((st) => st.name));
+  let prevAt = STAGES[last].at;
+  for (let i = 15; i <= 40; i++) {
+    const g = getStage(i);
+    assert.equal(g.generated, true, 'generated flag ' + i);
+    assert.equal(g.id, 'beyond_' + i);
+    assert.match(g.id, ID);
+    assert.ok(g.at > prevAt, 'at must rise at ' + i);
+    prevAt = g.at;
+    for (const k of ['at', 'detail', 'bloom', 'orbit', 'camDist']) assert.ok(Number.isFinite(g[k]), k + ' finite at ' + i);
+    for (const key of ['core', 'glow', 'rim', 'bg', 'accent']) assert.match(g.palette[key], HEX, 'palette.' + key + ' at ' + i);
+    assert.equal(g.detail, 6);
+    assert.ok(g.bloom <= 2.5 && g.orbit <= 4 && g.camDist >= 2, 'within authored ceiling at ' + i);
+    assert.ok(typeof g.blurb === 'string' && g.blurb.length > 8);
+    assert.ok(!names.has(g.name), 'duplicate name ' + g.name + ' at ' + i);
+    names.add(g.name);
+  }
+  assert.equal(getStage(20), getStage(20), 'generated stages are cached');
+});
+
+test('generated names never repeat within the first 100 generated indices', () => {
+  const names = new Set();
+  for (let i = STAGES.length; i < STAGES.length + 100; i++) {
+    const n = getStage(i).name;
+    assert.ok(!names.has(n), 'repeat ' + n + ' at ' + i);
+    names.add(n);
+  }
+});
+
+test('stageThreshold is strictly increasing across the authored/generated boundary', () => {
+  const last = STAGES.length - 1;
+  for (let i = 0; i <= last; i++) assert.equal(stageThreshold(i), STAGES[i].at);
+  assert.ok(stageThreshold(15) > STAGES[14].at);
+  assert.equal(stageThreshold(last + 1), STAGES[last].at * 10);
+  for (let i = 1; i <= 120; i++) {
+    assert.ok(stageThreshold(i) > stageThreshold(i - 1), 'threshold must rise at ' + i);
+    assert.equal(stageThreshold(i), getStage(i).at);
+  }
+});
+
+test('stage helpers never throw or go non-finite for odd indices', () => {
+  for (const i of [-5, 0.7, 14.9, 1e3, 1e6, NaN, Infinity, -Infinity]) {
+    assert.ok(Number.isFinite(stageThreshold(i)), 'threshold ' + i);
+    const g = getStage(i);
+    assert.ok(g && Number.isFinite(g.at), 'stage ' + i);
+  }
+});
+
+test('a save at stage 30 round-trips and keeps stage 30', () => {
+  const st = createState(7);
+  st.lifetimeFlux = stageThreshold(30) * 1.5;
+  st.stageIndex = 30;
+  const back = load(save(st));
+  assert.ok(back);
+  assert.equal(back.stageIndex, 30);
+  assert.equal(stageFor(back).id, 'beyond_30');
+  const snap = snapshot(back);
+  assert.equal(snap.stage.index, 30);
+  assert.equal(snap.stage.nextAt, stageThreshold(31));
+  assert.ok(snap.stage.progress > 0 && snap.stage.progress < 1);
+});
+
+test('the advance loop climbs past the last authored stage', () => {
+  const st = createState(3);
+  st.lifetimeFlux = stageThreshold(22) * 2;
+  tick(st, 0.1, null);
+  assert.equal(st.stageIndex, 22);
 });

@@ -4,7 +4,7 @@
 // Every number that reaches the state goes through fin()/safeAdd(), so NaN/Infinity can never
 // leak into flux: a non-finite computation is clamped to 0 (or to Number.MAX_VALUE for costs)
 // and the game keeps going.
-import { INJECTORS, UPGRADES, STAGES, PERKS, ACHIEVEMENTS } from './content.js';
+import { INJECTORS, UPGRADES, STAGES, PERKS, ACHIEVEMENTS, getStage, stageThreshold } from './content.js';
 import { TUNE } from './tune.js';
 import { clamp } from './math.js';
 import { EVT } from './events.js';
@@ -366,12 +366,15 @@ export function triggerOverdrive(state, bus) {
 // ---------------------------------------------------------------- stages ----------------
 export function stageFor(state) {
   if (STG.length === 0) return null;
-  return STG[clamp(Math.floor(fin(state.stageIndex)), 0, STG.length - 1)];
+  return getStage(fin(state.stageIndex));
 }
 function checkStage(state, bus) {
-  while (state.stageIndex + 1 < STG.length && fin(state.lifetimeFlux) >= num(STG[state.stageIndex + 1].at, Infinity)) {
+  // Endless: one generated stage per decade of lifetime flux. The strict-increase guard stops
+  // the loop once thresholds saturate at Number.MAX_VALUE.
+  while (fin(state.lifetimeFlux) >= stageThreshold(state.stageIndex + 1)
+    && stageThreshold(state.stageIndex + 1) > stageThreshold(state.stageIndex)) {
     state.stageIndex += 1;
-    const s = STG[state.stageIndex];
+    const s = getStage(state.stageIndex);
     emit(bus, EVT.STAGE_UP, { index: state.stageIndex, id: s.id, name: s.name });
   }
 }
@@ -578,8 +581,8 @@ export function snapshot(state) {
   const gm = globalMult(state);
   const flux = fin(state.flux);
   const s = stageFor(state);
-  const idx = s ? STG.indexOf(s) : 0;
-  const next = STG[idx + 1];
+  const idx = s ? Math.floor(fin(state.stageIndex)) : 0;
+  const next = s ? getStage(idx + 1) : undefined;
   const curAt = s ? num(s.at, 0) : 0;
   const nextAt = next ? num(next.at, 0) : null;
   const progress = next ? clamp(fin((fin(state.lifetimeFlux) - curAt) / Math.max(1e-9, nextAt - curAt)), 0, 1) : 1;
@@ -677,7 +680,7 @@ export function load(text) {
   if (isObj(d.stats)) {
     for (const k of Object.keys(s.stats)) s.stats[k] = Math.max(0, num(d.stats[k], 0));
   }
-  s.stageIndex = STG.length ? clamp(Math.floor(s.stageIndex), 0, STG.length - 1) : 0;
+  s.stageIndex = STG.length ? Math.max(0, Math.floor(fin(s.stageIndex))) : 0;
   s.overdrive = clamp(s.overdrive, 0, num(TUNE.overdrive.need, 100));
   s.combo = Math.min(s.combo, num(TUNE.combo.maxCombo, 50));
   return s;

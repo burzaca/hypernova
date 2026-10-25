@@ -133,3 +133,70 @@ export const ACHIEVEMENTS = [
   { id: 'upgrades_30', name: 'Thirty Upgrades', at: { upgradesOwned: 30 }, blurb: 'Thirty upgrades — every mechanism has been refined.' },
   { id: 'hour_played', name: 'Hour of Feeding', at: { playSec: 3600 }, blurb: 'One hour — the core has been fed long enough.' },
 ];
+
+// ---------------------------------------------------------------- endless stages ---------
+// Past the last authored stage the star keeps evolving: one generated form per decade of
+// lifetime flux, forever (docs/ENDLESS.md §1). Pure, deterministic, never throws.
+// Name pairs repeat only every lcm(16, 13) = 208 indices (7 ⟂ 16, 3 ⟂ 13).
+const BEYOND_PREFIX = ['ASHEN', 'VOID', 'ETERNAL', 'SILENT', 'GILDED', 'HOLLOW', 'RADIANT', 'SHATTERED',
+  'ABYSSAL', 'CELESTIAL', 'ENDLESS', 'PRIMORDIAL', 'WOVEN', 'FROZEN', 'BURNING', 'OBSIDIAN'];
+const BEYOND_NOUN = ['CROWN', 'MAW', 'LATTICE', 'CATHEDRAL', 'TIDE', 'HALO', 'ENGINE', 'BLOOM',
+  'THRONE', 'VEIL', 'SPIRAL', 'CHORUS', 'HORIZON'];
+const BEYOND_BLURBS = [
+  'Beyond the map of stars — the core rewrites what light can be.',
+  'Another decade of flux, another shape the universe never named.',
+  'The dark leans closer to watch what the fire becomes next.',
+  'Old laws of physics bend politely out of the way.',
+  'The star remembers every form it wore and wears them all at once.',
+  'Light folds over itself, brighter on the inside than the out.',
+  'Whole epochs pass in a single heartbeat of the core.',
+  'Even the void has started feeding it.',
+  'No observatory could hold this — only you are left to see it.',
+  'The hunger does not end; it only learns new colours.',
+];
+const BEYOND_PALETTES = [
+  { core: '#e6f0ff', glow: '#7a9cff', rim: '#f2f6ff', bg: '#070a14', accent: '#8fb0ff' },
+  { core: '#ffe0f0', glow: '#ff5fa8', rim: '#fff0f8', bg: '#140710', accent: '#ff7ab8' },
+  { core: '#e8ffe0', glow: '#66ff99', rim: '#f2fff0', bg: '#06120a', accent: '#5cf08a' },
+  { core: '#fff4d6', glow: '#ffb020', rim: '#fffaee', bg: '#120c04', accent: '#ffc040' },
+  { core: '#f0e6ff', glow: '#9a5cff', rim: '#f8f2ff', bg: '#0c0714', accent: '#b07aff' },
+  { core: '#d6fbff', glow: '#22d8ff', rim: '#eefdff', bg: '#041014', accent: '#40e0ff' },
+  { core: '#ffe6dc', glow: '#ff4a2a', rim: '#fff2ee', bg: '#140704', accent: '#ff6a48' },
+  { core: '#f4f4f4', glow: '#c8c8e0', rim: '#ffffff', bg: '#0a0a0e', accent: '#dcdcf0' },
+];
+const DARKEN = 0.6;
+const darkenHex = (hex) => '#' + [1, 3, 5]
+  .map((o) => Math.round(parseInt(hex.slice(o, o + 2), 16) * DARKEN).toString(16).padStart(2, '0'))
+  .join('');
+const LAST = STAGES.length - 1;
+const stageCache = new Map();
+const toIndex = (index) => (Number.isFinite(index) && index > 0 ? Math.floor(index) : 0);
+
+/** Flux threshold of stage `index` (any index >= 0). Strictly increasing while finite; capped at
+ *  Number.MAX_VALUE so it never returns a non-finite number. */
+export function stageThreshold(index) {
+  const i = toIndex(index);
+  if (i <= LAST) return STAGES[i].at;
+  const at = STAGES[LAST].at * Math.pow(10, i - LAST);
+  return Number.isFinite(at) ? at : Number.MAX_VALUE;
+}
+
+/** Stage object for any index >= 0: authored entry, or a cached deterministic generated one. */
+export function getStage(index) {
+  const i = toIndex(index);
+  if (i <= LAST) return STAGES[i];
+  let s = stageCache.get(i);
+  if (s) return s;
+  const pal = BEYOND_PALETTES[i % BEYOND_PALETTES.length];
+  s = {
+    id: 'beyond_' + i,
+    name: BEYOND_PREFIX[(i * 7) % BEYOND_PREFIX.length] + ' ' + BEYOND_NOUN[(i * 3) % BEYOND_NOUN.length],
+    at: stageThreshold(i),
+    detail: 6, bloom: 1.6, orbit: 2.2, camDist: 5.0,
+    palette: { ...pal, bg: darkenHex(pal.bg) },
+    blurb: BEYOND_BLURBS[(i - LAST - 1) % BEYOND_BLURBS.length],
+    generated: true,
+  };
+  stageCache.set(i, s);
+  return s;
+}
