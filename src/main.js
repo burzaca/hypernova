@@ -4,6 +4,8 @@ import { TUNE } from './core/tune.js';
 import { clamp, angleDelta } from './core/math.js';
 import * as eco from './core/economy.js';
 import { createHUD } from './ui/hud.js';
+import { createCoach } from './ui/onboarding.js';
+import { createTitleCard } from './ui/titlecard.js';
 import { createAudio } from './core/audio.js';
 
 const FIXED_DT = 1 / 120;
@@ -33,6 +35,7 @@ let holding = false;
 let holdAcc = 0;
 let hudBroken = false;
 let sceneBroken = false;
+let coach = null;
 
 function fail(err) {
   console.error(err);
@@ -48,16 +51,20 @@ async function boot() {
   scene = createScene(canvas, bus);
   audio = createAudio(bus);
   hud = createHUD(hudRoot, bus, api);
+  coach = createCoach(bus, api);
 
-  const saved = eco.load(localStorage.getItem(TUNE.save.key));
+  // ?state=<json> loads a save straight from the URL: a debug hook and a "share my run" handle.
+  const urlState = new URLSearchParams(location.search).get('state');
+  const saved = eco.load(urlState || localStorage.getItem(TUNE.save.key));
   state = saved || eco.createState(1);
-  if (saved) {
+  if (saved && !urlState) {
     const away = (Date.now() - (state.lastSave || Date.now())) / 1000;
     const gained = eco.applyOffline(state, away, bus);
     if (gained > 0) bus.emit(EVT.LOG, { text: 'While you were away: +' + gained });
   }
 
   resize();
+  snap = eco.snapshot(state);   // first frame paints the star behind the title card
   window.addEventListener('resize', resize);
   bindInput();
   if (bootEl) bootEl.style.display = 'none';
@@ -71,6 +78,13 @@ async function boot() {
     }
   });
   window.addEventListener('pagehide', save);
+  // The title card is the user gesture browsers require for audio; the sim waits for it.
+  running = false;
+  createTitleCard(() => {
+    unlockAudio();
+    running = true;
+    last = performance.now();
+  });
   requestAnimationFrame(frame);
 }
 
@@ -155,46 +169,53 @@ function save() {
 // ---------------------------------------------------------------- loop
 function frame(now) {
   requestAnimationFrame(frame);
-  if (!running) return;
   let dt = (now - last) / 1000;
   last = now;
   if (dt > 0.25) dt = 0.25;              // tab was throttled: do not fast-forward the economy
 
-  // input rate limiting
-  pulseBudget = Math.min(MAX_PPS / 60, pulseBudget + dt * MAX_PPS);
-  if (holding) {
-    holdAcc += dt;
-    while (holdAcc >= 1 / HOLD_PPS) { holdAcc -= 1 / HOLD_PPS; const g = eco.pulse(state, bus); if (g > 0) audio.pulse && audio.pulse(state.combo); }
+  if (running) {
+    // input rate limiting
+    pulseBudget = Math.min(MAX_PPS / 60, pulseBudget + dt * MAX_PPS);
+    if (holding) {
+      holdAcc += dt;
+      while (holdAcc >= 1 / HOLD_PPS) { holdAcc -= 1 / HOLD_PPS; const g = eco.pulse(state, bus); if (g > 0) audio.pulse && audio.pulse(state.combo); }
+    }
+
+    acc += dt;
+    let steps = 0;
+    while (acc >= FIXED_DT && steps < 20) {
+      eco.tick(state, FIXED_DT, bus);
+      acc -= FIXED_DT;
+      steps += 1;
+    }
+    if (steps >= 20) acc = 0;
+
+    snapAcc += dt;
+    if (snapAcc >= 1 / SNAP_HZ || !snap) {
+      snapAcc = 0;
+      snap = eco.snapshot(state);
+      // A HUD fault must never take the game (or the star) down with it.
+      try {
+        hud.update(snap);
+      } catch (err) {
+        if (!hudBroken) { hudBroken = true; console.error('HUD update failed', err); bus.emit(EVT.ERROR, { where: 'hud', err: String(err) }); }
+      }
+      if (coach) { try { coach.update(snap); } catch { /* coaching is optional */ } }
+    }
+
+    saveTimer += dt;
+    if (saveTimer >= TUNE.save.autosaveSec) { saveTimer = 0; save(); }
   }
 
-  acc += dt;
-  let steps = 0;
-  while (acc >= FIXED_DT && steps < 20) {
-    eco.tick(state, FIXED_DT, bus);
-    acc -= FIXED_DT;
-    steps += 1;
-  }
-  if (steps >= 20) acc = 0;
-
-  snapAcc += dt;
-  if (snapAcc >= 1 / SNAP_HZ || !snap) {
-    snapAcc = 0;
-    snap = eco.snapshot(state);
-    // A HUD fault must never take the game (or the star) down with it.
+  // The star keeps turning even while paused or behind the title card: a live backdrop, not a
+  // blank canvas. dt=0 freezes the game clock but not the visuals.
+  if (snap) {
     try {
-      hud.update(snap);
+      scene.update(snap, running ? dt : 0);
     } catch (err) {
-      if (!hudBroken) { hudBroken = true; console.error('HUD update failed', err); bus.emit(EVT.ERROR, { where: 'hud', err: String(err) }); }
+      if (!sceneBroken) { sceneBroken = true; console.error('scene update failed', err); }
     }
   }
-  try {
-    scene.update(snap, dt);
-  } catch (err) {
-    if (!sceneBroken) { sceneBroken = true; console.error('scene update failed', err); }
-  }
-
-  saveTimer += dt;
-  if (saveTimer >= TUNE.save.autosaveSec) { saveTimer = 0; save(); }
 }
 
 boot().catch(fail);

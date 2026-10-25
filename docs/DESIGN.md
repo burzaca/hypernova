@@ -49,27 +49,30 @@ bigger.
   = `floor((runFlux / shardDiv) ^ shardExp)`. Each Shard gives `+shardGainPct` to all
   production, and Shards buy **PERKS** — 10+ mechanic-changing permanent upgrades. This is the
   "meaningful choice" layer.
-- **ASCEND** (layer 2, unlocks at `ascend.at` total flux): reset everything including Shards,
-  gain **Nova Cores** = `floor((totalFlux / ascend.at) ^ coreExp)`, each giving
-  `+coreGainPct` (compounding), and Cores unlock a second injector family plus a new colour
-  theme. This is what stops minute 30+ from being the same game.
+- **ASCEND** (layer 2, unlocks at `ascend.at` total flux — currently 1e12, ~30 minutes in):
+  reset everything including Shards and perks, gain **Nova Cores**
+  = `floor((totalFlux / ascend.at) ^ coreExp)`, each giving `+coreGainPct` (compounding), and
+  Cores unlock a second injector family plus a new colour theme. This is what stops minute 30+
+  from being the same game.
 
 ## 5. Stage evolution (visible progress = the glue)
-`STAGES` is a table of total-flux thresholds with a palette, bloom value, core geometry detail
-level, camera distance and a name (SPARK → EMBER → PLASMA → STAR → RED GIANT → SUPERNOVA →
-NEUTRON STAR → QUASAR → HYPERNOVA → …). Crossing one fires a shockwave, a fanfare, a toast, and
-permanently changes how the Core looks. The player must *see* their power.
+`STAGES` is a table of **lifetime-flux** thresholds (`lifetimeFlux` — never reset by any prestige)
+with a palette, bloom value, core geometry detail level, camera distance and a name (SPARK →
+EMBER → PLASMA → … → SINGULARITY). Crossing one fires a shockwave, a fanfare, a toast, and
+permanently changes how the Core looks. The player must *see* their power, and must never lose it.
+The ladder is a ~5× curve fitted to the measured growth curve (`node tools/curve.js`), so a new
+form lands roughly every few minutes instead of every half hour.
 
-## 6. Pacing contract (the "not boring after 5 minutes" gate — the sim must pass this)
+## 6. Pacing contract (the "not boring after 5 minutes" gate — the sim enforces it in CI)
 | By | Must happen |
 |---|---|
-| < 10 s | first injector affordable and bought |
-| < 60 s | first STAGE up |
-| < 90 s | first OVERDRIVE |
-| 4–8 min | first COLLAPSE available |
-| every ≤ 90 s | at least one affordable purchase at all times during Act 1 (no dead walls) |
-| 25–45 min | first ASCEND available |
-| always | next goal visible and its distance shown |
+| ≤ 10 s | first injector bought |
+| ≤ 60 s | first stage up, and 5 distinct forms seen |
+| ≤ 90 s | first OVERDRIVE |
+| ≥ 3 min and ≤ 8 min | first COLLAPSE (not sooner: it must feel like a decision) |
+| ≤ 10 min | 9 forms seen |
+| 15–45 min | first ASCEND |
+| every ≤ 90 s | at least one affordable purchase at all times (no dead walls) |
 
 If `tools/simulate.js` fails this table, the build is not shipped — the numbers get retuned.
 

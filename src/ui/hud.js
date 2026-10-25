@@ -1,561 +1,526 @@
+// HYPERNOVA — HUD (DOM only). Contract: docs/INTERFACES.md §8.
+// The DOM is built once; update(snap) only writes textContent / data-* / style widths on
+// existing nodes. Rows are created the first time their id appears and reused forever after.
+// Every click handler reads the closure variable `latest`, never a per-frame argument.
 import { formatNumber, formatRate, formatMult, formatTime, progress01 } from '../core/format.js';
 import { TUNE } from '../core/tune.js';
 import { EVT } from '../core/events.js';
+// Static data lookup only (names + `requires`): the snapshot carries neither upgrade/perk
+// requirements nor injector names for requirement text, so D6 needs the content tables.
+import { INJECTORS, UPGRADES, PERKS } from '../core/content.js';
 
-// Helper to create DOM elements with IDs for easy caching
-function createElement(tag, id) {
-  const el = document.createElement(tag);
-  el.id = id;
-  return el;
+const INJ_NAME = new Map(INJECTORS.map((i) => [i.id, i.name]));
+const REQ = new Map([...UPGRADES, ...PERKS].map((u) => [u.id, u.requires || null]));
+const LOCKED_UPGRADES_SHOWN = 3;
+const TOAST_SLOTS = 4;
+const TOAST_MS = 3200;
+const CONFIRM_MS = 3000;
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
+function setText(n, t) { if (n.textContent !== t) n.textContent = t; }
+function setData(n, k, v) { if (n.dataset[k] !== v) n.dataset[k] = v; }
+function setHidden(n, h) { if (n.hidden !== h) n.hidden = h; }
+function pct(x) { return formatNumber(Math.floor(x * 100)) + '%'; }
+
+const REQ_LABEL = {
+  totalFlux: (v) => formatNumber(v) + ' total flux',
+  collapses: (v) => formatNumber(v) + (v === 1 ? ' collapse' : ' collapses'),
+  ascends: (v) => formatNumber(v) + (v === 1 ? ' ascend' : ' ascends'),
+  pulses: (v) => formatNumber(v) + ' pulses',
+  crits: (v) => formatNumber(v) + ' crits',
+  perfects: (v) => formatNumber(v) + ' perfects',
+  overdrives: (v) => formatNumber(v) + ' overdrives',
+  stageIndex: (v) => 'stage ' + formatNumber(v + 1),
+  injectorsTotal: (v) => formatNumber(v) + ' injectors',
+  upgradesOwned: (v) => formatNumber(v) + ' upgrades',
+  playSec: (v) => formatTime(v) + ' played',
+};
+function requirementText(id) {
+  const req = REQ.get(id);
+  if (!req) return 'locked';
+  const parts = [];
+  if (req.injector) parts.push(formatNumber(req.count != null ? req.count : 1) + ' ' + (INJ_NAME.get(req.injector) || req.injector));
+  for (const k of Object.keys(req)) {
+    if (k === 'injector' || k === 'count' || typeof req[k] !== 'number') continue;
+    parts.push(REQ_LABEL[k] ? REQ_LABEL[k](req[k]) : formatNumber(req[k]) + ' ' + k);
+  }
+  return parts.length ? 'needs ' + parts.join(', ') : 'locked';
+}
+function upgradeEffect(u) {
+  if (u.kind === 'injector_mult' && u.mult != null) return formatMult(u.mult) + ' one injector';
+  if (u.kind === 'global_mult' && u.mult != null) return formatMult(u.mult) + ' all flux';
+  if (u.kind === 'mechanic' && u.mechanic) return u.mechanic.key + ' ' + formatNumber(u.mechanic.value);
+  return '';
 }
 
-// Helper to set text content safely
-function setText(el, text) {
-  el.textContent = text;
-}
-
-// Main HUD class
 export function createHUD(root, bus, api) {
-  // Cache DOM elements by ID to avoid querySelector per frame
-  const cache = new Map();
-  
-  // Build the HUD structure
-  const fluxBlock = createElement('div', 'flux-block');
-  fluxBlock.style.position = 'absolute';
-  fluxBlock.style.left = '16px';
-  fluxBlock.style.top = '16px';
-  fluxBlock.style.zIndex = '10';
-  root.appendChild(fluxBlock);
-  
-  // FLUX value (huge)
-  const fluxValue = createElement('div', 'flux-value');
-  fluxValue.style.fontSize = '3.5rem';
-  fluxValue.style.fontVariantNumeric = 'tabular-nums';
-  fluxValue.style.fontFamily = 'monospace';
-  fluxBlock.appendChild(fluxValue);
-  
-  // FLUX rate
-  const fluxRate = createElement('div', 'flux-rate');
-  fluxRate.style.fontSize = '1.5rem';
-  fluxBlock.appendChild(fluxRate);
-  
-  // FLUX multiplier
-  const fluxMult = createElement('div', 'flux-mult');
-  fluxMult.style.fontSize = '1.5rem';
-  fluxBlock.appendChild(fluxMult);
-  
-  // Stage block (top-right)
-  const stageBlock = createElement('div', 'stage-block');
-  stageBlock.style.position = 'absolute';
-  stageBlock.style.right = '16px';
-  stageBlock.style.top = '16px';
-  stageBlock.style.zIndex = '10';
-  root.appendChild(stageBlock);
-  
-  // Stage name
-  const stageName = createElement('div', 'stage-name');
-  stageBlock.appendChild(stageName);
-  
-  // Stage progress bar
-  const stageBar = createElement('div', 'stage-bar');
-  stageBar.style.position = 'relative';
-  stageBar.style.height = '8px';
-  stageBar.style.width = '120px';
-  stageBar.style.backgroundColor = 'rgba(255,255,255,0.2)';
-  stageBar.style.borderRadius = '4px';
-  stageBlock.appendChild(stageBar);
-  
-  const stageBarFill = createElement('div', 'stage-bar-fill');
-  stageBar.appendChild(stageBarFill);
-  
-  // Play time
-  const playTime = createElement('div', 'play-time');
-  stageBlock.appendChild(playTime);
-  
-  // Mute button
-  const muteBtn = createElement('button', 'mute-btn');
-  muteBtn.textContent = '🔊';
-  muteBtn.title = 'Mute';
-  muteBtn.style.position = 'absolute';
-  muteBtn.style.right = '10px';
-  muteBtn.style.bottom = '10px';
-  stageBlock.appendChild(muteBtn);
-  
-  // Injectors list (left column)
-  const injectorList = createElement('div', 'injector-list');
-  injectorList.style.position = 'absolute';
-  injectorList.style.left = '16px';
-  injectorList.style.top = '140px';
-  injectorList.style.width = '40%';
-  injectorList.style.height = 'calc(100vh - 200px)';
-  injectorList.style.overflow = 'auto';
-  injectorList.style.backgroundColor = 'rgba(0,0,0,0.6)';
-  injectorList.style.borderRadius = '4px';
-  injectorList.style.padding = '8px';
-  root.appendChild(injectorList);
-  
-  // Right column panels (tabs)
-  const panelsContainer = createElement('div', 'panels-container');
-  panelsContainer.style.position = 'absolute';
-  panelsContainer.style.right = '16px';
-  panelsContainer.style.top = '140px';
-  panelsContainer.style.width = '35%';
-  panelsContainer.style.height = 'calc(100vh - 200px)';
-  panelsContainer.style.overflow = 'hidden';
-  root.appendChild(panelsContainer);
-  
-  // Tabs
-  const tabs = createElement('div', 'panels-tabs');
-  tabs.style.position = 'absolute';
-  tabs.style.left = '0';
-  tabs.style.bottom = '0';
-  tabs.style.height = '32px';
-  tabs.style.display = 'flex';
-  tabs.style.borderTop = '1px solid rgba(255,255,255,0.2)';
-  panelsContainer.appendChild(tabs);
-  
-  const tabUpgrades = createElement('button', 'tab-upgrades');
-  tabUpgrades.textContent = 'UPGRADES';
-  tabUpgrades.style.flex = '1';
-  tabs.appendChild(tabUpgrades);
-  
-  const tabPrestige = createElement('button', 'tab-prestige');
-  tabPrestige.textContent = 'COLLAPSE/ASCEND';
-  tabPrestige.style.flex = '1';
-  tabs.appendChild(tabPrestige);
-  
-  const tabStats = createElement('button', 'tab-stats');
-  tabStats.textContent = 'STATS';
-  tabStats.style.flex = '1';
-  tabs.appendChild(tabStats);
-  
-  const panelContent = createElement('div', 'panel-content');
-  panelsContainer.appendChild(panelContent);
-  
-  // Combo meter (bottom center)
-  const comboMeter = createElement('div', 'combo-meter');
-  comboMeter.style.position = 'absolute';
-  comboMeter.style.bottom = '16px';
-  comboMeter.style.left = '50%';
-  comboMeter.style.transform = 'translateX(-50%)';
-  comboMeter.style.width = '160px';
-  comboMeter.style.height = '24px';
-  comboMeter.style.backgroundColor = 'rgba(0,0,0,0.5)';
-  comboMeter.style.borderRadius = '4px';
-  comboMeter.style.alignItems = 'center';
-  comboMeter.style.display = 'flex';
-  comboMeter.style.justifyContent = 'center';
-  comboMeter.style.alignItems = 'center';
-  root.appendChild(comboMeter);
-  
-  const comboFill = createElement('div', 'combo-fill');
-  comboFill.style.height = '100%';
-  comboFill.style.width = '0%';
-  comboFill.style.backgroundColor = '#ffd9a0';
-  comboMeter.appendChild(comboFill);
-  
-  const comboText = createElement('div', 'combo-text');
-  comboMeter.appendChild(comboText);
-  
-  // Overdrive meter (bottom center)
-  const overdriveMeter = createElement('div', 'overdrive-meter');
-  overdriveMeter.style.position = 'absolute';
-  overdriveMeter.style.bottom = '16px';
-  overdriveMeter.style.left = '50%';
-  overdriveMeter.style.transform = 'translateX(-50%)';
-  overdriveMeter.style.width = '160px';
-  overdriveMeter.style.height = '24px';
-  overdriveMeter.style.backgroundColor = 'rgba(0,0,0,0.5)';
-  overdriveMeter.style.borderRadius = '4px';
-  overdriveMeter.style.alignItems = 'center';
-  overdriveMeter.style.display = 'flex';
-  overdriveMeter.style.justifyContent = 'center';
-  overdriveMeter.style.alignItems = 'center';
-  root.appendChild(overdriveMeter);
-  
-  const overdriveFill = createElement('div', 'overdrive-fill');
-  overdriveFill.style.height = '100%';
-  overdriveFill.style.width = '0%';
-  overdriveFill.style.backgroundColor = '#ff7a1a';
-  overdriveMeter.appendChild(overdriveFill);
-  
-  const overdriveStatus = createElement('div', 'overdrive-status');
-  overdriveMeter.appendChild(overdriveStatus);
-  
-  // Toast log (bottom left)
-  const toastContainer = createElement('div', 'toast-container');
-  toastContainer.style.position = 'absolute';
-  toastContainer.style.bottom = '16px';
-  toastContainer.style.left = '16px';
-  toastContainer.style.width = '240px';
-  toastContainer.style.height = '60px';
-  toastContainer.style.overflow = 'hidden';
-  root.appendChild(toastContainer);
-  
-  // Overdrive button (mobile only)
-  const overdriveBtn = createElement('button', 'overdrive-btn');
-  overdriveBtn.textContent = 'READY — press O';
-  overdriveBtn.style.position = 'absolute';
-  overdriveBtn.style.bottom = '16px';
-  overdriveBtn.style.left = '50%';
-  overdriveBtn.style.transform = 'translateX(-50%)';
-  overdriveBtn.style.display = 'none';
-  overdriveBtn.style.padding = '8px 16px';
-  overdriveBtn.style.backgroundColor = '#ff7a1a';
-  overdriveBtn.style.color = 'white';
-  overdriveBtn.style.border = 'none';
-  overdriveBtn.style.borderRadius = '4px';
-  overdriveBtn.style.cursor = 'pointer';
-  root.appendChild(overdriveBtn);
-  
-  // Cache all elements for performance
-  cache.set('flux-value', fluxValue);
-  cache.set('flux-rate', fluxRate);
-  cache.set('flux-mult', fluxMult);
-  cache.set('stage-name', stageName);
-  cache.set('stage-bar-fill', stageBarFill);
-  cache.set('play-time', playTime);
-  cache.set('mute-btn', muteBtn);
-  cache.set('combo-fill', comboFill);
-  cache.set('combo-text', comboText);
-  cache.set('overdrive-fill', overdriveFill);
-  cache.set('overdrive-status', overdriveStatus);
-  cache.set('combo-meter', comboMeter);
-  cache.set('overdrive-meter', overdriveMeter);
-  cache.set('overdrive-btn', overdriveBtn);
-  cache.set('injector-list', injectorList);
-  cache.set('panels-container', panelsContainer);
-  cache.set('tabs', tabs);
-  cache.set('tab-upgrades', tabUpgrades);
-  cache.set('tab-prestige', tabPrestige);
-  cache.set('tab-stats', tabStats);
-  cache.set('panel-content', panelContent);
-  
-  // Event listeners
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'o') {
-      api.toggleOverdrive();
-    }
-  });
-  
-  // Mute button
-  muteBtn.addEventListener('click', () => {
-    api.toggleMute();
-  });
-  
-  // Overdrive button (mobile)
-  overdriveBtn.addEventListener('click', () => {
-    api.toggleOverdrive();
-  });
-  
-  // Injector rows
-  const injectorRows = new Map();
-  
-  // Initialize with empty state
-  function updateUI(snap) {
-    // Update flux values
-    setText(cache.get('flux-value'), formatNumber(snap.flux));
-    setText(cache.get('flux-rate'), formatRate(snap.rate));
-    const effectiveMult = snap.comboMult * (snap.overdriveTimer > 0 ? TUNE.overdrive.mult : 1);
-    setText(cache.get('flux-mult'), formatMult(effectiveMult));
-    
-    // Update stage info
-    const stage = snap.stage;
-    setText(cache.get('stage-name'), stage.name);
-    // Stage progress arrives normalised from the economy; do not re-normalise it.
-    stageBarFill.style.width = `${Math.max(0, Math.min(1, stage.progress || 0)) * 100}%`;
-    setText(cache.get('stage-bar-fill'), '');
-    setText(cache.get('play-time'), formatTime(snap.playSec));
+  let latest = null;
+  let activeTab = 'upgrades';
+  let lastPalette = '';
+  const disposers = [];
+  const on = (target, evt, fn, opts) => { target.addEventListener(evt, fn, opts); disposers.push(() => target.removeEventListener(evt, fn, opts)); };
+  const onBus = (evt, fn) => { bus.on(evt, fn); disposers.push(() => bus.off(evt, fn)); };
 
-    // Mute state is owned by the audio layer; read it through the api, never assume it.
+  // ------------------------------------------------------------ skeleton
+  const left = el('div', 'hud-col hud-left');
+  const right = el('div', 'hud-col hud-right');
+  const meters = el('div', 'hud-meters');
+  root.append(left, right, meters);
+
+  // flux block
+  const fluxBlock = el('div', 'panel flux-block');
+  const fluxValue = el('div', 'flux-value', '0');
+  const fluxRate = el('div', 'flux-rate', '');
+  const fluxMult = el('div', 'flux-mult', '');
+  fluxBlock.append(el('div', 'flux-label', 'FLUX'), fluxValue, fluxRate, fluxMult);
+
+  // injector shop
+  const shop = el('div', 'panel shop');
+  const shopList = el('div', 'shop-list');
+  const lockedGhost = el('div', 'locked-ghost');
+  lockedGhost.hidden = true;
+  shop.append(el('div', 'panel-title', 'INJECTORS'), shopList, lockedGhost);
+
+  // toasts
+  const toasts = el('div', 'toasts');
+  toasts.setAttribute('aria-live', 'polite');
+  const toastEls = [];
+  for (let i = 0; i < TOAST_SLOTS; i++) { const t = el('div', 'toast'); t.hidden = true; toasts.appendChild(t); toastEls.push(t); }
+  left.append(fluxBlock, shop, toasts);
+
+  // stage block (top right): flex rows so mute can never overlap the play time (D4)
+  const stageBlock = el('div', 'panel stage-block');
+  const stageHead = el('div', 'stage-head');
+  const stageName = el('div', 'stage-name', '');
+  const muteBtn = el('button', 'mute-btn', '🔊');
+  muteBtn.type = 'button';
+  muteBtn.title = 'Mute (M)';
+  muteBtn.setAttribute('aria-label', 'Toggle sound');
+  stageHead.append(stageName, muteBtn);
+  const stageBar = el('div', 'bar stage-bar');
+  const stageBarFill = el('div', 'bar-fill');
+  stageBar.appendChild(stageBarFill);
+  const stageMeta = el('div', 'stage-meta');
+  const stageNext = el('span', 'stage-next', '');
+  const playTime = el('span', 'play-time', '');
+  stageMeta.append(stageNext, playTime);
+  stageBlock.append(stageHead, stageBar, stageMeta);
+
+  // tabbed panel
+  const tabsPanel = el('div', 'panel tabs-panel');
+  const tabBar = el('div', 'tab-bar');
+  tabBar.setAttribute('role', 'tablist');
+  const TAB_DEFS = [['upgrades', 'UPGRADES'], ['prestige', 'COLLAPSE/ASCEND'], ['stats', 'STATS']];
+  const tabBtns = {};
+  const tabBodies = {};
+  for (const [id, label] of TAB_DEFS) {
+    const b = el('button', 'tab-btn', label);
+    b.type = 'button';
+    b.dataset.tab = id;
+    b.setAttribute('role', 'tab');
+    tabBar.appendChild(b);
+    tabBtns[id] = b;
+    const body = el('div', 'tab-body');
+    body.dataset.tab = id;
+    tabBodies[id] = body;
+  }
+  tabsPanel.append(tabBar, tabBodies.upgrades, tabBodies.prestige, tabBodies.stats);
+  right.append(stageBlock, tabsPanel);
+
+  // upgrades tab
+  const upgEmpty = el('div', 'empty-note', 'Nothing to buy yet — keep pulsing.');
+  const upgLive = el('div', 'upg-live');
+  const upgLockedTitle = el('div', 'sub-title', 'COMING UP');
+  const upgLocked = el('div', 'upg-locked');
+  tabBodies.upgrades.append(upgEmpty, upgLive, upgLockedTitle, upgLocked);
+
+  // prestige tab
+  function prestigeCard(kind, title) {
+    const card = el('button', 'prestige-card');
+    card.type = 'button';
+    card.dataset.prestige = kind;
+    const t = el('div', 'pc-title', title);
+    const gain = el('div', 'pc-gain', '');
+    const note = el('div', 'pc-note', '');
+    const reason = el('div', 'pc-reason', '');
+    card.append(t, gain, note, reason);
+    return { card, t, gain, note, reason, armedUntil: 0 };
+  }
+  const collapseCard = prestigeCard('collapse', 'COLLAPSE');
+  const ascendCard = prestigeCard('ascend', 'ASCEND');
+  const shardLine = el('div', 'currency-line', '');
+  const perkList = el('div', 'perk-list');
+  tabBodies.prestige.append(collapseCard.card, ascendCard.card, shardLine, el('div', 'sub-title', 'PERKS (spend shards)'), perkList);
+
+  // stats tab + save
+  const statsGrid = el('dl', 'stats-grid');
+  const STAT_DEFS = [
+    ['playSec', 'Play time'], ['totalFlux', 'Total flux'], ['runFlux', 'Flux this run'],
+    ['bestRate', 'Best rate'], ['spent', 'Flux spent'], ['pulses', 'Pulses'], ['crits', 'Crits'],
+    ['perfects', 'Perfects'], ['collapses', 'Collapses'], ['totalShards', 'Total shards'],
+    ['ascends', 'Ascends'], ['cores', 'Nova cores'],
+  ];
+  const statEls = {};
+  for (const [k, label] of STAT_DEFS) {
+    const dd = el('dd', null, '');
+    statsGrid.append(el('dt', null, label), dd);
+    statEls[k] = dd;
+  }
+  const saveBox = el('div', 'save-box');
+  const saveText = el('textarea', 'save-text');
+  saveText.rows = 3;
+  saveText.spellcheck = false;
+  saveText.placeholder = 'Export fills this box; paste a save here and press Import.';
+  const saveRow = el('div', 'save-row');
+  const exportBtn = el('button', 'btn', 'Export');
+  const importBtn = el('button', 'btn', 'Import');
+  exportBtn.type = importBtn.type = 'button';
+  saveRow.append(exportBtn, importBtn);
+  saveBox.append(el('div', 'sub-title', 'SAVE'), saveText, saveRow);
+  tabBodies.stats.append(statsGrid, saveBox);
+
+  // bottom-centre meters
+  const comboMeter = el('div', 'panel meter combo-meter');
+  const comboFill = el('div', 'meter-fill');
+  const comboText = el('div', 'meter-text', 'COMBO x1');
+  comboMeter.append(comboFill, comboText);
+  const odMeter = el('button', 'panel meter od-meter');
+  odMeter.type = 'button';
+  odMeter.title = 'Overdrive (O)';
+  odMeter.dataset.state = 'charging';
+  const odFill = el('div', 'meter-fill');
+  const odText = el('div', 'meter-text', 'OVERDRIVE 0%');
+  odMeter.append(odFill, odText);
+  meters.append(comboMeter, odMeter);
+
+  // ------------------------------------------------------------ rows (created once per id)
+  const injRows = new Map();
+  function injRow(inj) {
+    let r = injRows.get(inj.id);
+    if (r) return r;
+    const row = el('div', 'injector-row');
+    row.dataset.injector = inj.id;
+    row.dataset.affordable = '0';
+    row.setAttribute('role', 'button');
+    row.tabIndex = 0;
+    const name = el('span', 'inj-name', inj.name);
+    const owned = el('span', 'inj-owned', '');
+    const cost = el('span', 'inj-cost', '');
+    const rate = el('span', 'inj-rate', '');
+    row.append(name, owned, rate, cost);
+    shopList.appendChild(row);
+    r = { row, name, owned, cost, rate };
+    injRows.set(inj.id, r);
+    return r;
+  }
+
+  const upgRows = new Map();
+  function upgRow(u) {
+    let r = upgRows.get(u.id);
+    if (r) return r;
+    const row = el('div', 'upgrade-row');
+    row.dataset.upgrade = u.id;
+    row.dataset.affordable = '0';
+    row.dataset.locked = '0';
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
+    const name = el('span', 'upg-name', u.name);
+    const cost = el('span', 'upg-cost', '');
+    const info = el('span', 'upg-info', '');
+    row.append(name, cost, info);
+    r = { row, name, cost, info, effect: upgradeEffect(u), blurb: u.blurb || '' };
+    upgRows.set(u.id, r);
+    return r;
+  }
+
+  const perkRows = new Map();
+  function perkRow(p) {
+    let r = perkRows.get(p.id);
+    if (r) return r;
+    const row = el('div', 'perk-row');
+    row.dataset.perk = p.id;
+    row.dataset.affordable = '0';
+    row.dataset.owned = '0';
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
+    const name = el('span', 'perk-name', p.name);
+    const cost = el('span', 'perk-cost', '');
+    const info = el('span', 'perk-info', p.blurb || '');
+    row.append(name, cost, info);
+    perkList.appendChild(row);
+    r = { row, name, cost, info };
+    perkRows.set(p.id, r);
+    return r;
+  }
+
+  // ------------------------------------------------------------ input (all read `latest`)
+  function activate(target) {
+    if (!latest || !target) return;
+    const injRowEl = target.closest('[data-injector]');
+    if (injRowEl) {
+      const id = injRowEl.dataset.injector;
+      const inj = latest.injectors.find((i) => i.id === id);
+      if (inj && inj.unlocked) api.buyInjector(id);
+      return;
+    }
+    const upgEl = target.closest('[data-upgrade]');
+    if (upgEl) {
+      const id = upgEl.dataset.upgrade;
+      const u = latest.upgrades.find((x) => x.id === id);
+      if (u && u.unlocked) api.buyUpgrade(id);
+      return;
+    }
+    const perkEl = target.closest('[data-perk]');
+    if (perkEl) {
+      const id = perkEl.dataset.perk;
+      const p = latest.perks.find((x) => x.id === id);
+      if (p && !p.owned) api.buyPerk(id);
+      return;
+    }
+    const pEl = target.closest('[data-prestige]');
+    if (pEl) {
+      const kind = pEl.dataset.prestige;
+      const card = kind === 'collapse' ? collapseCard : ascendCard;
+      const ok = kind === 'collapse' ? latest.collapse.available : latest.ascend.available;
+      if (!ok) return;
+      const now = performance.now();
+      if (now > card.armedUntil) { card.armedUntil = now + CONFIRM_MS; render(); return; } // 2-step confirm
+      card.armedUntil = 0;
+      if (kind === 'collapse') api.collapse(); else api.ascend();
+    }
+  }
+  const panelClick = (e) => activate(e.target);
+  const panelKey = (e) => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role="button"]')) { e.preventDefault(); activate(e.target); }
+  };
+  on(left, 'click', panelClick);
+  on(right, 'click', panelClick);
+  on(left, 'keydown', panelKey);
+  on(right, 'keydown', panelKey);
+  on(tabBar, 'click', (e) => {
+    const b = e.target.closest('[data-tab]');
+    if (b) { activeTab = b.dataset.tab; applyTab(); }
+  });
+  on(muteBtn, 'click', () => { if (api.toggleMute) api.toggleMute(); renderMute(); });
+  // O / M keys are bound in main.js; the meter is the touch/click affordance.
+  on(odMeter, 'click', () => { api.toggleOverdrive(); });
+  on(exportBtn, 'click', () => {
+    try { saveText.value = api.exportSave(); saveText.select(); toast('Save exported — copy the text.'); }
+    catch (err) { toast('Export failed'); }
+  });
+  on(importBtn, 'click', () => {
+    const txt = saveText.value.trim();
+    if (!txt) { toast('Paste a save first.'); return; }
+    toast(api.importSave(txt) ? 'Save imported.' : 'Import failed: not a valid save.');
+  });
+
+  function applyTab() {
+    for (const [id] of TAB_DEFS) {
+      const sel = id === activeTab;
+      tabBtns[id].classList.toggle('active', sel);
+      tabBtns[id].setAttribute('aria-selected', sel ? 'true' : 'false');
+      setHidden(tabBodies[id], !sel);
+    }
+  }
+  applyTab();
+
+  function renderMute() {
     const muted = api.isMuted ? api.isMuted() : false;
     muteBtn.classList.toggle('muted', muted);
-    muteBtn.textContent = muted ? '🔇' : '🔊';
-    
-    // Combo meter
-    const comboFill = cache.get('combo-fill');
-    const comboText = cache.get('combo-text');
-    const comboFillWidth = Math.min(1, snap.combo / (TUNE.combo.maxCombo || 1)) * 100;
-    comboFill.style.width = `${comboFillWidth}%`;
-    setText(comboText, formatMult(snap.comboMult));
-    
-    // Overdrive meter
-    const overdriveFill = cache.get('overdrive-fill');
-    const overdriveStatus = cache.get('overdrive-status');
-    const overdriveTimer = snap.overdriveTimer || 0;
-    const overdriveFull = snap.overdrive >= TUNE.overdrive.need;
-    const overdriveActive = overdriveTimer > 0;
-    const overdriveFillWidth = Math.min(1, overdriveFull ? 1 : overdriveFull);
-    overdriveFill.style.width = `${overdriveFillWidth * 100}%`;
-    if (overdriveActive && overdriveFull) {
-      overdriveFill.style.border = '2px solid #ffd9a0';
-      overdriveFill.style.boxShadow = '0 0 24px rgba(255,217,16,0.5)';
-      setText(overdriveStatus, 'READY — press O');
-      overdriveBtn.style.display = 'block';
-    } else {
-      setText(overdriveStatus, overdriveFull ? 'OVERDRIVE ACTIVE' : 'WAITING');
-      overdriveBtn.style.display = 'none';
-    }
-    
-    // Injector list
-    const injectorListEl = cache.get('injector-list');
-    injectorListEl.innerHTML = ''; // Clear and rebuild (only 12 injectors, acceptable)
-    const unlockedInjectors = snap.injectors.filter(i => i.unlocked);
-    const lockedInjector = unlockLockedInjector(snap.injectors);
-    
-    unlockedInjectors.forEach(injector => {
-      const row = createElement('div', `injector-row-${injector.id}`);
-      row.style.display = 'flex';
-      row.style.alignItems = 'center';
-      row.style.padding = '4px 0';
-      row.style.borderBottom = '1px solid rgba(255,255,255,0.1)';
-      row.style.fontSize = '0.9rem';
-      
-      // Check if affordable
-      const isAffordable = injector.affordable;
-      row.dataset.affordable = isAffordable ? '1' : '0';
-      
-      // Name
-      const nameEl = createElement('span', `injector-name-${injector.id}`);
-      setText(nameEl, injector.name);
-      row.appendChild(nameEl);
-      
-      // Owned count
-      const ownedEl = createElement('span', `injector-owned-${injector.id}`);
-      setText(ownedEl, formatNumber(injector.owned));
-      row.appendChild(ownedEl);
-      
-      // Cost
-      const costEl = createElement('span', `injector-cost-${injector.id}`);
-      setText(costEl, formatNumber(injector.cost));
-      row.appendChild(costEl);
-      
-      // Rate
-      const rateEl = createElement('span', `injector-rate-${injector.id}`);
-      setText(rateEl, formatRate(injector.rate));
-      row.appendChild(rateEl);
-      
-      // Delta on hover/focus
-      const deltaEl = createElement('span', `injector-delta-${injector.id}`);
-      deltaEl.style.display = 'none';
-      row.addEventListener('mouseenter', () => {
-        setText(deltaEl, '+' + formatRate(injector.rate));
-        deltaEl.style.display = 'block';
-      });
-      row.addEventListener('mouseleave', () => {
-        setText(deltaEl, '');
-        deltaEl.style.display = 'none';
-      });
-      row.addEventListener('focus', () => {
-        setText(deltaEl, '+' + formatRate(injector.rate));
-        deltaEl.style.display = 'block';
-      });
-      row.addEventListener('focusout', () => {
-        setText(deltaEl, '');
-        deltaEl.style.display = 'none';
-      });
-      
-      row.appendChild(deltaEl);
-      injectorListEl.appendChild(row);
-      cache.set(`injector-row-${injector.id}`, row);
-    });
-    
-    // Update prestige panel (tabs)
-    const panelContent = cache.get('panel-content');
-    panelContent.innerHTML = '';
-    
-    // Upgrades tab
-    const upgradesPanel = createElement('div', 'upgrades-panel');
-    panelContent.appendChild(upgradesPanel);
-    
-    // Show upgrades
-    snap.upgrades.forEach(upgrade => {
-      const upgradeEl = createElement('div', `upgrade-${upgrade.id}`);
-      upgradeEl.style.display = 'flex';
-      upgradeEl.style.justifyContent = 'space-between';
-      upgradeEl.style.padding = '4px 0';
-      upgradeEl.style.borderBottom = '1px solid rgba(255,255,255,0.1)';
-      upgradeEl.style.fontSize = '0.8rem';
-      
-      // Name and cost
-      const nameEl = createElement('span', `upgrade-name-${upgrade.id}`);
-      setText(nameEl, upgrade.name);
-      upgradeEl.appendChild(nameEl);
-      
-      const costEl = createElement('span', `upgrade-cost-${upgrade.id}`);
-      setText(costEl, formatNumber(upgrade.cost));
-      upgradeEl.appendChild(costEl);
-      
-      // Affordable flag
-      const affordable = upgrade.affordable;
-      upgradeEl.dataset.affordable = affordable ? '1' : '0';
-      
-      // Next 3 locked upgrades
-      const lockedNext = getLockedNextUpgrades(upgrade, 3);
-      lockedNext.forEach(nextUpgrade => {
-        const lockedEl = createElement('div', `upgrade-locked-${nextUpgrade.id}`);
-        lockedEl.style.display = 'flex';
-        lockedEl.style.justifyContent = 'space-between';
-        lockedEl.style.padding = '4px 0';
-        lockedEl.style.fontSize = '0.7rem';
-        lockedEl.style.color = '#aaa';
-        lockedEl.style.opacity = '0.6';
-        lockedEl.style.pointerEvents = 'none';
-        
-        const nameEl = createElement('span', `upgrade-locked-name-${nextUpgrade.id}`);
-        setText(nameEl, nextUpgrade.name);
-        lockedEl.appendChild(nameEl);
-        
-        const costEl = createElement('span', `upgrade-locked-cost-${nextUpgrade.id}`);
-        setText(costEl, formatNumber(nextUpgrade.cost));
-        lockedEl.appendChild(costEl);
-        
-        upgradeEl.appendChild(lockedEl);
-      });
-      
-      upgradesPanel.appendChild(upgradeEl);
-    });
-    
-    // Prestige panel
-    const prestigePanel = createElement('div', 'prestige-panel');
-    panelContent.appendChild(prestigePanel);
-    
-    const collapseAvailable = snap.collapse.available;
-    const collapseShards = snap.collapse.shards;
-    const ascendAvailable = snap.ascend.available;
-    const ascendCores = snap.ascend.cores;
-    
-    const collapseBtn = createElement('div', 'prestige-collapse');
-    const collapseInfo = createElement('div', 'prestige-info');
-    setText(collapseInfo, `COLLAPSE: ${formatNumber(collapseShards)} shards`);
-    collapseBtn.appendChild(collapseInfo);
-    if (!collapseAvailable) {
-      const reason = 'insufficient shards';
-      const reasonEl = createElement('div', 'prestige-reason');
-      setText(reasonEl, `Unavailable: ${reason}`);
-      collapseBtn.appendChild(reasonEl);
-    }
-    prestigePanel.appendChild(collapseBtn);
-    
-    const ascendBtn = createElement('div', 'prestige-ascend');
-    const ascendInfo = createElement('div', 'prestige-info');
-    setText(ascendInfo, `ASCEND: ${formatNumber(ascendCores)} cores`);
-    ascendBtn.appendChild(ascendInfo);
-    if (!ascendAvailable) {
-      const reason = 'insufficient flux';
-      const reasonEl = createElement('div', 'prestige-reason');
-      setText(reasonEl, `Unavailable: ${reason}`);
-      ascendBtn.appendChild(reasonEl);
-    }
-    prestigePanel.appendChild(ascendBtn);
-    
-    // Stats panel
-    const statsPanel = createElement('div', 'stats-panel');
-    panelContent.appendChild(statsPanel);
-    
-    const stats = snap.stats;
-    const statsEl = createElement('div', 'stats-info');
-    setText(statsEl, `Pulses: ${formatNumber(stats.pulses)} | Crits: ${formatNumber(stats.crits)} | Perfects: ${formatNumber(stats.perfects)} | Play: ${formatTime(stats.playSec)} | Spent: ${formatNumber(stats.spent)} | Best Rate: ${formatRate(stats.bestRate)}`);
-    statsPanel.appendChild(statsEl);
+    setText(muteBtn, muted ? '🔇' : '🔊');
   }
-  
-  // Helper to find locked injector ghost
-  function unlockLockedInjector(injectors) {
-    const locked = injectors.find(i => !i.unlocked);
-    if (!locked) return null;
-    const ghost = createElement('div', 'locked-ghost');
-    setText(ghost, `LOCKED at ${formatNumber(locked.unlockAt != null ? locked.unlockAt : 0)}`);
-    return ghost;
+
+  // ------------------------------------------------------------ toasts
+  let toastIdx = 0;
+  const toastTimers = new Array(TOAST_SLOTS).fill(0);
+  function toast(text) {
+    if (!text) return;
+    const i = toastIdx; toastIdx = (toastIdx + 1) % TOAST_SLOTS;
+    const t = toastEls[i];
+    t.textContent = text;
+    t.hidden = false;
+    toasts.appendChild(t); // newest at the bottom
+    clearTimeout(toastTimers[i]);
+    toastTimers[i] = setTimeout(() => { t.hidden = true; }, TOAST_MS);
   }
-  
-  // Helper to get next locked upgrades
-  function getLockedNextUpgrades(upgrade, count) {
-    const locked = snap.upgrades.filter(u => !u.affordable);
-    return locked.slice(0, count);
-  }
-  
-  // Handle buy actions
-  const buyHandlers = {
-    injector: (id) => {
-      const injector = snap.injectors.find(i => i.id === id);
-      if (injector && injector.affordable) {
-        api.buyInjector(id);
-      }
-    },
-    upgrade: (id) => {
-      const upgrade = snap.upgrades.find(u => u.id === id);
-      if (upgrade && upgrade.affordable) {
-        api.buyUpgrade(id);
-      }
-    },
-    perk: (id) => {
-      const perk = snap.perks.find(p => p.id === id);
-      if (perk && perk.owned) {
-        // Perks are permanent, no buy action needed
-      }
-    }
-  };
-  
-  // Set up event listeners for UI updates
-  bus.on(EVT.LOG, (payload) => {
-    const toastText = payload.text || '';
-    addToast(toastText);
+  onBus(EVT.LOG, (p) => {
+    if (!p) return;
+    if (p.text) toast(p.text);
+    else if (p.kind === 'offline' && p.gain > 0) toast('While you were away: +' + formatNumber(p.gain) + ' flux');
   });
-  
-  // Update function
-  function update(snap) {
-    // Update UI elements
-    updateUI(snap);
-    
-    // Update overdrive button visibility
-    const overdriveFill = cache.get('overdrive-fill');
-    const overdriveStatus = cache.get('overdrive-status');
-    const overdriveFull = snap.overdrive >= TUNE.overdrive.need;
-    const overdriveActive = snap.overdriveTimer > 0;
-    const overdriveFillWidth = Math.min(1, overdriveFull ? 1 : overdriveFull);
-    overdriveFill.style.width = `${overdriveFillWidth * 100}%`;
-    
-    // Update overdrive status
-    if (overdriveActive && overdriveFull) {
-      overdriveStatus.textContent = 'READY — press O';
+  onBus(EVT.STAGE_UP, (p) => toast('Stage reached: ' + ((p && p.name) || '')));
+  onBus(EVT.ACHIEVEMENT, (p) => toast('Achievement: ' + ((p && p.name) || '')));
+  onBus(EVT.OVERDRIVE_START, () => toast('OVERDRIVE!'));
+  onBus(EVT.COLLAPSE, (p) => toast('Collapsed: +' + formatNumber((p && p.shards) || 0) + ' shards'));
+  onBus(EVT.ASCEND, (p) => toast('Ascended: +' + formatNumber((p && p.cores) || 0) + ' cores'));
+
+  // ------------------------------------------------------------ per-frame render
+  let upgOrderKey = '';
+  function render() {
+    const snap = latest;
+    if (!snap) return;
+
+    // palette -> CSS vars (only when the stage changes)
+    const pal = snap.stage && snap.stage.palette;
+    const palKey = pal ? (pal.core || '') + (pal.glow || '') + (pal.accent || '') : '';
+    if (palKey && palKey !== lastPalette) {
+      lastPalette = palKey;
+      if (pal.core) root.style.setProperty('--hn-core', pal.core);
+      if (pal.glow) root.style.setProperty('--hn-glow', pal.glow);
+      if (pal.accent) root.style.setProperty('--hn-accent', pal.accent);
+    }
+
+    // flux
+    setText(fluxValue, formatNumber(snap.flux));
+    setText(fluxRate, formatRate(snap.rate));
+    const odActive = snap.overdriveTimer > 0;
+    setText(fluxMult, 'combo ' + formatMult(snap.comboMult) + (odActive ? '  ·  overdrive ' + formatMult(TUNE.overdrive.mult) : ''));
+
+    // stage
+    const st = snap.stage;
+    setText(stageName, st.name);
+    stageBarFill.style.width = (progress01(st.progress, 1) * 100) + '%';
+    setText(stageNext, st.nextAt != null ? 'next at ' + formatNumber(st.nextAt) + ' (' + pct(progress01(st.progress, 1)) + ')' : 'final stage');
+    setText(playTime, formatTime(snap.playSec));
+    renderMute();
+
+    // injectors (D1, D2)
+    let nextLocked = null;
+    for (const inj of snap.injectors) {
+      const r = injRow(inj);
+      if (!inj.unlocked) {
+        setHidden(r.row, true);
+        if (!nextLocked) nextLocked = inj;
+        continue;
+      }
+      setHidden(r.row, false);
+      setData(r.row, 'affordable', inj.affordable ? '1' : '0');
+      setText(r.owned, 'x' + formatNumber(inj.owned));
+      setText(r.rate, formatRate(inj.rate));
+      setText(r.cost, 'cost ' + formatNumber(inj.cost));
+    }
+    if (nextLocked) {
+      setHidden(lockedGhost, false);
+      setText(lockedGhost, 'LOCKED at ' + formatNumber(nextLocked.unlockAt) + ' flux');
+    } else setHidden(lockedGhost, true);
+
+    // upgrades (D6): unlocked rows live, next three locked rows greyed with requirement
+    const live = [];
+    const locked = [];
+    for (const u of snap.upgrades) (u.unlocked ? live : locked).push(u);
+    live.sort((a, b) => a.cost - b.cost);
+    locked.sort((a, b) => a.cost - b.cost);
+    const shownLocked = locked.slice(0, LOCKED_UPGRADES_SHOWN);
+    const key = live.map((u) => u.id).join(',') + '|' + shownLocked.map((u) => u.id).join(',');
+    if (key !== upgOrderKey) { // membership changed: re-slot rows (rare; appendChild moves nodes)
+      upgOrderKey = key;
+      for (const r of upgRows.values()) setHidden(r.row, true);
+      for (const u of live) { const r = upgRow(u); setData(r.row, 'locked', '0'); upgLive.appendChild(r.row); setHidden(r.row, false); }
+      for (const u of shownLocked) { const r = upgRow(u); setData(r.row, 'locked', '1'); upgLocked.appendChild(r.row); setHidden(r.row, false); }
+      setHidden(upgEmpty, live.length > 0);
+      setHidden(upgLockedTitle, shownLocked.length === 0);
+    }
+    for (const u of live) {
+      const r = upgRows.get(u.id);
+      setData(r.row, 'affordable', u.affordable ? '1' : '0');
+      setText(r.cost, formatNumber(u.cost));
+      setText(r.info, r.effect || r.blurb);
+    }
+    for (const u of shownLocked) {
+      const r = upgRows.get(u.id);
+      setData(r.row, 'affordable', '0');
+      setText(r.cost, formatNumber(u.cost));
+      setText(r.info, requirementText(u.id));
+    }
+
+    // prestige (D7)
+    const P = TUNE.prestige;
+    const now = performance.now();
+    const cc = collapseCard;
+    const cAvail = !!snap.collapse.available;
+    setData(cc.card, 'available', cAvail ? '1' : '0');
+    cc.card.setAttribute('aria-disabled', cAvail ? 'false' : 'true');
+    setText(cc.gain, '+' + formatNumber(snap.collapse.shards) + ' shards (each +' + formatNumber(P.shardGainPct * 100) + '% forever)');
+    setText(cc.note, 'Resets flux, injectors and upgrades. Keeps stage, shards, perks.');
+    if (!cAvail) setText(cc.reason, 'Unavailable: needs ' + formatNumber(P.shardDiv) + ' flux this run (now ' + formatNumber(snap.runFlux) + ')');
+    else setText(cc.reason, now < cc.armedUntil ? 'Click again to confirm' : 'Click to collapse');
+    setData(cc.card, 'armed', now < cc.armedUntil ? '1' : '0');
+
+    const ac = ascendCard;
+    const aAvail = !!snap.ascend.available;
+    setData(ac.card, 'available', aAvail ? '1' : '0');
+    ac.card.setAttribute('aria-disabled', aAvail ? 'false' : 'true');
+    setText(ac.gain, '+' + formatNumber(snap.ascend.cores) + ' cores (each ' + formatMult(1 + P.coreGainPct) + ' forever, compounding)');
+    setText(ac.note, 'Resets everything incl. total flux, shards and perks. Keeps stages and achievements.');
+    if (!aAvail) setText(ac.reason, 'Unavailable: needs ' + formatNumber(P.ascendAt) + ' total flux (now ' + formatNumber(snap.totalFlux) + ')');
+    else setText(ac.reason, now < ac.armedUntil ? 'Click again to confirm' : 'Click to ascend');
+    setData(ac.card, 'armed', now < ac.armedUntil ? '1' : '0');
+
+    setText(shardLine, 'Shards: ' + formatNumber(snap.shards) + '  ·  total ' + formatNumber(snap.totalShards) + '  ·  Cores: ' + formatNumber(snap.cores));
+    for (const p of snap.perks) {
+      const r = perkRow(p);
+      setData(r.row, 'owned', p.owned ? '1' : '0');
+      setData(r.row, 'affordable', !p.owned && p.affordable ? '1' : '0');
+      setText(r.cost, p.owned ? 'OWNED' : formatNumber(p.cost) + ' shards');
+      if (!p.owned && !p.affordable) {
+        const req = REQ.get(p.id);
+        setText(r.info, req ? requirementText(p.id) : (p.blurb || ''));
+      } else setText(r.info, p.blurb || '');
+    }
+
+    // stats
+    const s = snap.stats || {};
+    setText(statEls.playSec, formatTime(snap.playSec));
+    setText(statEls.totalFlux, formatNumber(snap.totalFlux));
+    setText(statEls.runFlux, formatNumber(snap.runFlux));
+    setText(statEls.bestRate, formatRate(s.bestRate || 0));
+    setText(statEls.spent, formatNumber(s.spent || 0));
+    setText(statEls.pulses, formatNumber(s.pulses || 0));
+    setText(statEls.crits, formatNumber(s.crits || 0));
+    setText(statEls.perfects, formatNumber(s.perfects || 0));
+    setText(statEls.collapses, formatNumber(snap.collapses));
+    setText(statEls.totalShards, formatNumber(snap.totalShards));
+    setText(statEls.ascends, formatNumber(snap.ascends));
+    setText(statEls.cores, formatNumber(snap.cores));
+
+    // combo meter
+    comboFill.style.width = (progress01(snap.combo, TUNE.combo.maxCombo) * 100) + '%';
+    setText(comboText, 'COMBO ' + formatMult(snap.comboMult));
+
+    // overdrive meter (D5)
+    const need = TUNE.overdrive.need;
+    if (odActive) {
+      setData(odMeter, 'state', 'active');
+      const dur = Math.max(TUNE.overdrive.duration, snap.overdriveTimer);
+      odFill.style.width = (progress01(snap.overdriveTimer, dur) * 100) + '%';
+      setText(odText, 'OVERDRIVE ' + formatTime(Math.ceil(snap.overdriveTimer)) + ' left');
+    } else if (snap.overdrive >= need) {
+      setData(odMeter, 'state', 'ready');
+      odFill.style.width = '100%';
+      setText(odText, 'READY — press O');
     } else {
-      overdriveStatus.textContent = overdriveFull ? 'OVERDRIVE ACTIVE' : 'WAITING';
+      setData(odMeter, 'state', 'charging');
+      const f = progress01(snap.overdrive, need);
+      odFill.style.width = (f * 100) + '%';
+      setText(odText, 'OVERDRIVE ' + pct(f));
     }
   }
-  
-  // Toast log management
-  const toastSlots = 5;
-  const toastSlotsEl = createElement('div', 'toast-slots');
-  toastContainer.appendChild(toastSlotsEl);
-  
-  const toastElements = [];
-  for (let i = 0; i < toastSlots; i++) {
-    const el = createElement('div', `toast-slot-${i}`);
-    el.style.display = 'none';
-    toastSlotsEl.appendChild(el);
-    toastElements.push(el);
-  }
-  
-  function addToast(text) {
-    const slotIndex = (toastElements.length + 1) % toastSlots;
-    const slotEl = toastElements[slotIndex];
-    setText(slotEl, text);
-    slotEl.style.display = 'block';
-    setTimeout(() => {
-      slotEl.style.display = 'none';
-    }, 3000);
-  }
-  
-  // Return the public API
+
   return {
     update(snap) {
-      updateUI(snap);
+      latest = snap;
+      render();
     },
     dispose() {
-      // Clean up event listeners
-      window.removeEventListener('keydown', () => {});
-      muteBtn.removeEventListener('click', () => {});
-      overdriveBtn.removeEventListener('click', () => {});
-    }
+      for (const d of disposers) d();
+      disposers.length = 0;
+      for (const t of toastTimers) clearTimeout(t);
+      left.remove(); right.remove(); meters.remove();
+    },
   };
 }

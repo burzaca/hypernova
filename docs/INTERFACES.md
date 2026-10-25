@@ -158,7 +158,7 @@ export function applyOffline(state, elapsedSec, bus) -> number
 ```js
 {
   v: 1, seed: 1,
-  flux: 0, totalFlux: 0, runFlux: 0,
+  flux: 0, totalFlux: 0, runFlux: 0, lifetimeFlux: 0,   // lifetimeFlux is never reset by prestige
   injectors: { ion_spark: 0 },
   upgrades: {}, perks: {}, achievements: {},
   shards: 0, totalShards: 0, collapses: 0,
