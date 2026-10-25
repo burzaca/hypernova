@@ -91,3 +91,28 @@ Autosave to localStorage every 15 s, export/import string, offline progress capp
 - `src/ui/**` — DOM only.
 - `src/main.js` — the only place that wires them together. Owned by the PM.
 - `tools/simulate.js` — headless autoplay bot; the balance gate.
+
+## 10. Playtest revision (2026-10-25) — what the player's report changed
+
+The first outside playtest produced three findings. All three were real, all three are now design
+rules rather than patches:
+
+1. **No auto-clicker.** Holding the mouse was an auto-clicker wearing a click costume: it turned the
+   core loop into watching a number. One deliberate press = one pulse. The title card says so.
+2. **Pace to a real human, not an imagined one.** The stage ladder is fitted to a 6 CPS player —
+   the measured average (5–7 CPS sustained; ~12 CPS is the 10-second world record). `tools/fit-stages.js`
+   fits thresholds to target stage times by measuring the real economy, because thresholds feed back
+   into growth (stage index scales the pulse tier) and a single pass overshoots.
+3. **A prestige reset must state its price.** The player reached Auto Collapse without knowing a
+   collapse wipes injectors and upgrades, and reasonably asked why it was sold as an upgrade. So:
+   the COLLAPSE button now prints what it takes ("resets 24 injectors (318 levels) · 18 upgrades"),
+   the first collapse of a session needs a confirm, mechanic upgrades are grouped under MECHANICS
+   instead of masquerading as stat boosts, and Auto Collapse requires three manual collapses first.
+
+And the answer to "does it run out?": no, by design.
+
+- **Endless stages** — generated forever past the authored 15, one per decade of lifetime flux.
+- **Ascension Boons** — at every ascend, pick 1 of 3 modifiers that change the rules and each take
+  something away. Novelty, not bigger numbers, is what keeps a long run from feeling like the same
+  run. Boons ride the existing mechanic pipeline, so they cannot break the clamping rules, and their
+  offers are derived from the save's own seed, so a save reloads to the same choice.

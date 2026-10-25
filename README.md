@@ -34,14 +34,34 @@ enforced in CI:
 
 | By | Guaranteed |
 |---|---|
-| 1 s | first purchase |
-| 1 s | first stage evolution |
+| 0 s | first purchase |
+| 16 s | first star form |
 | 2 s | first overdrive |
-| 60 s | 5 distinct star forms seen |
-| 10 min | 9 forms seen |
-| ~4 min | first collapse (never before 3 min) |
-| 30 min | first ascend |
+| 1 min | 5 distinct star forms seen |
+| 9 min | 9 forms seen |
+| ~5 min | first collapse (never before 3 min) |
+| ~31 min | first ascend |
+| ~30 min | 13 forms seen — and the ladder continues for ever after that |
 | always | something affordable within 90 s — no dead walls |
+
+These numbers are measured against a **modelled human**, not a fictional one: the bot clicks at
+6 CPS, which is the researched average sustained click rate (5–7 CPS for an ordinary person over
+10–60 s — [cps-check.com](https://cps-check.com/),
+[redragonshop.com/pages/cps-test](https://redragonshop.com/pages/cps-test); the 10-second world
+record is ~12 CPS — [cpstest.org](https://cpstest.org/)). `node tools/simulate.js 3 42 3600 10`
+checks the fast-player case; the ladder is deliberately insensitive to click rate past the first
+few minutes. `tools/fit-stages.js` re-fits the ladder to target stage times whenever balance moves.
+
+## The endgame does not run out
+
+- **Endless stages.** Past the 15 hand-authored forms, `content.js` generates them forever — one
+  new star form per decade of lifetime flux, with names and palettes drawn from curated rings.
+  `getStage(index)` is pure and total; a save at stage 30 reloads at stage 30.
+- **Ascension Boons.** Every ASCEND offers 3 boons and you keep one, permanently. Each one changes
+  the *rules* and takes something away — "the core pulses itself 2×/s, overdrive peak is 3 lower",
+  "huge crit weight, combo decays much faster". 16 boons, every one a trade, chosen deterministically
+  from the save's own seed so a save reloads to the same offer. This is what stops a long run from
+  feeling like the same run.
 
 ```bash
 node --test tests/*.test.js      # contract tests for the economy, content tables, formatting
