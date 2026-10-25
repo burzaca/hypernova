@@ -55,13 +55,20 @@ few minutes. `tools/fit-stages.js` re-fits the ladder to target stage times when
 ## The endgame does not run out
 
 - **Endless stages.** Past the 15 hand-authored forms, `content.js` generates them forever — one
-  new star form per decade of lifetime flux, with names and palettes drawn from curated rings.
-  `getStage(index)` is pure and total; a save at stage 30 reloads at stage 30.
+  new form per `GEN_STEP` (currently ×4) of lifetime flux, with names and palettes drawn from
+  curated rings. `getStage(index)` is pure and total; a save at stage 30 reloads at stage 30.
+  At most 3 forms fire per tick, so an ascend that multiplies flux by 1e5 reads as a cascade
+  instead of fifteen events in one frame.
 - **Ascension Boons.** Every ASCEND offers 3 boons and you keep one, permanently. Each one changes
   the *rules* and takes something away — "the core pulses itself 2×/s, overdrive peak is 3 lower",
   "huge crit weight, combo decays much faster". 16 boons, every one a trade, chosen deterministically
   from the save's own seed so a save reloads to the same offer. This is what stops a long run from
-  feeling like the same run.
+  feeling like the same run. The sim measures the cadence: **no player should ever go longer than
+  `PACING.boonGapMax` (40 min, measured worst case 18m41s) without a new rule being offered** — CI
+  enforces it.
+- **A second injector family.** Six NOVA producers, unlocked by ascend count rather than flux, whose
+  output scales with Nova Cores (`TUNE.prestige.novaPerCore`). This is what Cores are *for*, and it
+  is why the shop says so out loud.
 
 ```bash
 node --test tests/*.test.js      # contract tests for the economy, content tables, formatting
