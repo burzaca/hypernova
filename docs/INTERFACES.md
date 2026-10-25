@@ -181,8 +181,8 @@ no references into the live state):
   overdrive,                                           // 0..TUNE.overdrive.need
   overdriveTimer,                                      // >0 while active
   stage: { index, id, name, palette, bloom, orbit, camDist, detail, nextAt, progress },
-  injectors: [ { id, name, tier, owned, cost, rate, affordable, unlocked, blurb } ],
-  upgrades:  [ { id, name, kind, cost, affordable, unlocked, blurb, mult, mechanic } ],
+  injectors: [ { id, name, tier, owned, cost, rate, baseRate, affordable, unlocked, blurb } ],
+  upgrades:  [ { id, name, kind, target, cost, affordable, unlocked, owned, blurb, mult, mechanic } ],
   perks:     [ { id, name, cost, affordable, owned, blurb } ],
   shards, totalShards, cores, ascends, collapses,
   collapse: { available, shards }, ascend: { available, cores },

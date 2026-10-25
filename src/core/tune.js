@@ -27,7 +27,7 @@ export const TUNE = {
     shardDiv: 1e6,
     shardExp: 0.5,
     shardGainPct: 0.01,   // +1% per Shard ever earned
-    ascendAt: 1e15,
+    ascendAt: 1e12,
     coreExp: 0.4,
     coreGainPct: 0.15,    // (1.15)^cores
   },
@@ -53,9 +53,12 @@ export const PACING = {
   firstPurchaseMax: 10,
   firstStageMax: 60,
   firstOverdriveMax: 90,
-  firstCollapseMin: 240,
+  firstCollapseMin: 180,
   firstCollapseMax: 480,
   purchaseGapMax: 90,
-  firstAscendMin: 1500,
+  firstAscendMin: 900,
   firstAscendMax: 2700,
+  // Visual evolution must keep pace with the prestige loop: these are the stage indices a
+  // competent player should have SEEN by these times (measured with tools/curve.js).
+  minStagesBy: [[60, 4], [600, 8], [1800, 10]],
 };

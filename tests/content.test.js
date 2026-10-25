@@ -95,7 +95,7 @@ test('perks use legal effect keys', () => {
 
 test('achievements use legal counters', () => {
   const ALLOWED = ['pulses', 'crits', 'perfects', 'collapses', 'ascends', 'overdrives',
-    'totalFlux', 'stageIndex', 'injectorsTotal', 'upgradesOwned', 'playSec'];
+    'totalFlux', 'lifetimeFlux', 'stageIndex', 'injectorsTotal', 'upgradesOwned', 'playSec'];
   for (const a of ACHIEVEMENTS) {
     assert.ok(a.at && typeof a.at === 'object', 'at ' + a.id);
     const keys = Object.keys(a.at);

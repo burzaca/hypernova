@@ -11,7 +11,8 @@ export function formatNumber(n, decimals = 2) {
   const neg = n < 0;
   const v = Math.abs(n);
   if (v < 1000) {
-    const s = v < 100 ? v.toFixed(Math.min(decimals, 2)) : String(Math.floor(v));
+    if (Number.isInteger(v)) return (neg ? '-' : '') + v;
+    const s = v < 10 ? v.toFixed(Math.min(decimals, 2)) : v.toFixed(1);
     return (neg ? '-' : '') + s;
   }
   const tier = Math.floor(Math.log10(v) / 3); // 1 => thousands

@@ -22,12 +22,13 @@ test('formatNumber ladder', () => {
   assert.equal(formatNumber(999), '999');
   assert.equal(formatNumber(1000), '1.00K');
   assert.equal(formatNumber(1234), '1.23K');
-  assert.equal(formatNumber(1.234e5), '123.40K');
+  assert.equal(formatNumber(1.234e5), '123.4K');
   assert.equal(formatNumber(1e6), '1.00M');
   assert.equal(formatNumber(1e9), '1.00B');
   assert.equal(formatNumber(1e12), '1.00T');
   assert.equal(formatNumber(1e15), '1.00Qa');
-  assert.equal(formatNumber(1e33), '1.00Dd');
+  assert.equal(formatNumber(1e33), '1.00Dc');
+  assert.equal(formatNumber(1e39), '1.00Dd');
   assert.ok(/e\d+$/.test(formatNumber(1e70)), 'scientific past the ladder: ' + formatNumber(1e70));
   assert.equal(formatNumber(Infinity), '∞');
   assert.equal(formatNumber(NaN), '—');
