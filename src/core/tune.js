@@ -44,7 +44,13 @@ export const TUNE = {
   sim: {
     dt: 1 / 30,
     maxSeconds: 3600,
-    botPulseRate: 6,      // the sim bot clicks 6x/s
+    // The bot models a real player's CLICK rate, and that number is not a guess. Manual clicking
+    // (the game has no auto-clicker) is 5-7 CPS for an average person sustained over 10-60 s
+    // (cps-check.com, redragonshop.com/pages/cps-test, clickspeedtester.com), 10-14 CPS for a
+    // trained jitter/butterfly clicker, ~12 CPS for the 10-second world record (cpstest.org).
+    // 6 CPS is therefore the honest "normal player" baseline the ladder is tuned against;
+    // `node tools/simulate.js 1 42 3600 10` checks the fast-player case.
+    botPulseRate: 6,
   },
 };
 
@@ -59,6 +65,8 @@ export const PACING = {
   firstAscendMin: 900,
   firstAscendMax: 2700,
   // Visual evolution must keep pace with the prestige loop: these are the stage indices a
-  // competent player should have SEEN by these times (measured with tools/curve.js).
-  minStagesBy: [[60, 4], [600, 8], [1800, 10]],
+  // player clicking at the researched average rate (6 CPS) should have SEEN by these times.
+  // Measured with tools/fit-stages.js, then given ~30% slack so the contract cannot drift into
+  // being tighter than the design intent.
+  minStagesBy: [[90, 4], [700, 8], [1200, 10]],
 };

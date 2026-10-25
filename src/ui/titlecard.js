@@ -41,7 +41,7 @@ export function createTitleCard(onStart) {
     <h1>HYPERNOVA</h1>
     <div class="tag">break the scale</div>
     <div class="keys">
-      <b>CLICK / HOLD</b> the core — pulse, keep the combo<br>
+      <b>CLICK</b> the core — one pulse per click, keep the combo<br>
       <b>SPACE</b> — fire the charge ring when the marker crosses the bright arc<br>
       <b>O</b> — overdrive &nbsp;·&nbsp; <b>M</b> mute &nbsp;·&nbsp; <b>P</b> pause
     </div>

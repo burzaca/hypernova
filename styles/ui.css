@@ -259,6 +259,13 @@
 .upgrade-row[data-affordable="1"], .perk-row[data-affordable="1"] { border-color: var(--hn-glow); box-shadow: inset 3px 0 0 var(--hn-glow); }
 .upgrade-row[data-locked="0"][data-affordable="0"] { opacity: 0.65; }
 .upgrade-row[data-locked="1"] { opacity: 0.4; filter: grayscale(1); cursor: default; border-style: dashed; }
+/* Mechanic upgrades: own group, distinct accent, full blurb (they change rules, not numbers). */
+.mech-title { color: #9fd3ff; }
+.upgrade-row[data-kind="mechanic"] { border-color: rgba(120, 190, 255, 0.35); background: rgba(80, 150, 255, 0.06); }
+.upgrade-row[data-kind="mechanic"] .upg-name { color: #bfe2ff; }
+.upgrade-row[data-kind="mechanic"] .upg-info { white-space: normal; overflow: visible; text-overflow: clip; }
+.upgrade-row[data-kind="mechanic"]:hover, .upgrade-row[data-kind="mechanic"]:focus-visible { background: rgba(80, 150, 255, 0.14); }
+.upgrade-row[data-kind="mechanic"][data-affordable="1"] { border-color: #6fb8ff; box-shadow: inset 3px 0 0 #6fb8ff; }
 .perk-row[data-owned="1"] { opacity: 0.55; cursor: default; }
 .perk-row[data-owned="1"] .perk-cost { color: #7fe39a; }
 .perk-row[data-owned="0"][data-affordable="0"] { opacity: 0.5; cursor: default; }
@@ -284,6 +291,12 @@
 .prestige-card[data-available="1"]:hover, .prestige-card[data-available="1"]:focus-visible { background: rgba(255, 140, 40, 0.14); outline: none; }
 .prestige-card[data-available="1"] .pc-reason { color: var(--hn-accent); }
 .prestige-card[data-armed="1"] { background: rgba(255, 90, 40, 0.22); animation: hn-pulse 0.8s ease-in-out infinite; }
+.prestige-card[data-prestige="collapse"] .pc-title { white-space: pre-wrap; }
+.prestige-card .pc-cost { font: 11px ui-monospace, monospace; color: var(--hn-dim); margin-top: 3px; }
+.prestige-card .pc-cost[hidden] { display: none; }
+.prestige-card[data-prestige="collapse"][data-armed="1"] { border-color: #ff6a4a; background: rgba(255, 70, 40, 0.28); }
+.prestige-card[data-prestige="collapse"][data-armed="1"] .pc-title { color: #ffb199; }
+.prestige-card[data-prestige="collapse"][data-armed="1"] .pc-reason { color: var(--hn-dim); font-size: 11px; }
 .prestige-card[data-available="0"] { opacity: 0.6; cursor: not-allowed; }
 .prestige-card[data-available="0"] .pc-reason { color: #ff8a7a; }
 .currency-line { margin-top: 8px; font: 12px ui-monospace, monospace; color: var(--hn-accent); }

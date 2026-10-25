@@ -10,11 +10,13 @@ import { EVT } from '../core/events.js';
 import { INJECTORS, UPGRADES, PERKS } from '../core/content.js';
 
 const INJ_NAME = new Map(INJECTORS.map((i) => [i.id, i.name]));
+const ALL_UPGRADE_IDS = UPGRADES.map((u) => u.id);
 const REQ = new Map([...UPGRADES, ...PERKS].map((u) => [u.id, u.requires || null]));
 const LOCKED_UPGRADES_SHOWN = 3;
 const TOAST_SLOTS = 4;
 const TOAST_MS = 3200;
 const CONFIRM_MS = 3000;
+const COLLAPSE_COACH = 'A collapse is ready. It resets your injectors and upgrades — Shards make the next run faster.';
 
 function el(tag, cls, text) {
   const n = document.createElement(tag);
@@ -58,8 +60,27 @@ function upgradeEffect(u) {
   return '';
 }
 
+// What a collapse takes away, computed from the snapshot only.
+// The economy omits already-bought upgrades from snapshot.upgrades (it lists what can still be
+// bought), so owned upgrades = content ids missing from that list, plus any flagged owned === true.
+function collapseLossText(snap) {
+  let n = 0, levels = 0;
+  for (const inj of (Array.isArray(snap.injectors) ? snap.injectors : [])) {
+    const o = Number(inj && inj.owned) || 0;
+    if (o > 0) { n += 1; levels += o; }
+  }
+  const listed = Array.isArray(snap.upgrades) ? snap.upgrades : [];
+  const present = new Set(listed.map((u) => u && u.id));
+  let u = listed.filter((x) => x && x.owned === true).length;
+  if (Array.isArray(snap.upgrades)) for (const id of ALL_UPGRADE_IDS) if (!present.has(id)) u += 1;
+  if (n === 0 && u === 0) return 'nothing to lose yet';
+  return 'resets ' + formatNumber(n) + ' injectors (' + formatNumber(levels) + ' levels) · ' + formatNumber(u) + ' upgrades';
+}
+
 export function createHUD(root, bus, api) {
   let latest = null;
+  let collapsedThisSession = false; // set by any collapse (manual or auto) seen this session
+  let collapseCoached = false;
   let activeTab = 'upgrades';
   let lastPalette = '';
   const disposers = [];
@@ -135,9 +156,14 @@ export function createHUD(root, bus, api) {
   // upgrades tab
   const upgEmpty = el('div', 'empty-note', 'Nothing to buy yet — keep pulsing.');
   const upgLive = el('div', 'upg-live');
+  // Mechanic upgrades change how the game plays (some automate resets); they get their own
+  // group so they never read like a stat boost.
+  const upgMechTitle = el('div', 'sub-title mech-title', 'MECHANICS');
+  upgMechTitle.hidden = true;
+  const upgMech = el('div', 'upg-mech');
   const upgLockedTitle = el('div', 'sub-title', 'COMING UP');
   const upgLocked = el('div', 'upg-locked');
-  tabBodies.upgrades.append(upgEmpty, upgLive, upgLockedTitle, upgLocked);
+  tabBodies.upgrades.append(upgEmpty, upgLive, upgMechTitle, upgMech, upgLockedTitle, upgLocked);
 
   // prestige tab
   function prestigeCard(kind, title) {
@@ -152,6 +178,7 @@ export function createHUD(root, bus, api) {
     return { card, t, gain, note, reason, armedUntil: 0 };
   }
   const collapseCard = prestigeCard('collapse', 'COLLAPSE');
+  collapseCard.gain.classList.add('pc-cost'); // line 2: what a collapse takes away (muted)
   const ascendCard = prestigeCard('ascend', 'ASCEND');
   const shardLine = el('div', 'currency-line', '');
   const perkList = el('div', 'perk-list');
@@ -225,6 +252,7 @@ export function createHUD(root, bus, api) {
     if (r) return r;
     const row = el('div', 'upgrade-row');
     row.dataset.upgrade = u.id;
+    row.dataset.kind = u.kind === 'mechanic' ? 'mechanic' : 'mult';
     row.dataset.affordable = '0';
     row.dataset.locked = '0';
     row.tabIndex = 0;
@@ -233,7 +261,7 @@ export function createHUD(root, bus, api) {
     const cost = el('span', 'upg-cost', '');
     const info = el('span', 'upg-info', '');
     row.append(name, cost, info);
-    r = { row, name, cost, info, effect: upgradeEffect(u), blurb: u.blurb || '' };
+    r = { row, name, cost, info, mechanic: u.kind === 'mechanic', effect: upgradeEffect(u), blurb: u.blurb || '' };
     upgRows.set(u.id, r);
     return r;
   }
@@ -289,7 +317,10 @@ export function createHUD(root, bus, api) {
       const ok = kind === 'collapse' ? latest.collapse.available : latest.ascend.available;
       if (!ok) return;
       const now = performance.now();
-      if (now > card.armedUntil) { card.armedUntil = now + CONFIRM_MS; render(); return; } // 2-step confirm
+      // Collapse: confirm only until the player has seen one happen this session (no nagging).
+      // Ascend: always 2-step.
+      const needConfirm = kind === 'collapse' ? !collapsedThisSession : true;
+      if (needConfirm && now > card.armedUntil) { card.armedUntil = now + CONFIRM_MS; render(); return; }
       card.armedUntil = 0;
       if (kind === 'collapse') api.collapse(); else api.ascend();
     }
@@ -298,6 +329,13 @@ export function createHUD(root, bus, api) {
   const panelKey = (e) => {
     if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role="button"]')) { e.preventDefault(); activate(e.target); }
   };
+  // Any click outside the armed collapse card disarms it.
+  on(document, 'pointerdown', (e) => {
+    if (collapseCard.armedUntil && !(e.target && e.target.closest && collapseCard.card.contains(e.target))) {
+      collapseCard.armedUntil = 0;
+      render();
+    }
+  }, true);
   on(left, 'click', panelClick);
   on(right, 'click', panelClick);
   on(left, 'keydown', panelKey);
@@ -356,7 +394,11 @@ export function createHUD(root, bus, api) {
   onBus(EVT.STAGE_UP, (p) => toast('Stage reached: ' + ((p && p.name) || '')));
   onBus(EVT.ACHIEVEMENT, (p) => toast('Achievement: ' + ((p && p.name) || '')));
   onBus(EVT.OVERDRIVE_START, () => toast('OVERDRIVE!'));
-  onBus(EVT.COLLAPSE, (p) => toast('Collapsed: +' + formatNumber((p && p.shards) || 0) + ' shards'));
+  onBus(EVT.COLLAPSE, (p) => {
+    collapsedThisSession = true; // manual or auto: from now on one click is enough
+    collapseCard.armedUntil = 0;
+    toast('Collapsed: +' + formatNumber((p && p.shards) || 0) + ' shards');
+  });
   onBus(EVT.ASCEND, (p) => toast('Ascended: +' + formatNumber((p && p.cores) || 0) + ' cores'));
 
   // ------------------------------------------------------------ per-frame render
@@ -410,26 +452,32 @@ export function createHUD(root, bus, api) {
     } else setHidden(lockedGhost, true);
 
     // upgrades (D6): unlocked rows live, next three locked rows greyed with requirement
+    const upgList = Array.isArray(snap.upgrades) ? snap.upgrades : [];
     const live = [];
     const locked = [];
-    for (const u of snap.upgrades) (u.unlocked ? live : locked).push(u);
+    for (const u of upgList) (u.unlocked ? live : locked).push(u);
     live.sort((a, b) => a.cost - b.cost);
     locked.sort((a, b) => a.cost - b.cost);
+    const liveMult = live.filter((u) => u.kind !== 'mechanic');
+    const liveMech = live.filter((u) => u.kind === 'mechanic');
     const shownLocked = locked.slice(0, LOCKED_UPGRADES_SHOWN);
-    const key = live.map((u) => u.id).join(',') + '|' + shownLocked.map((u) => u.id).join(',');
+    const key = liveMult.map((u) => u.id).join(',') + '|' + liveMech.map((u) => u.id).join(',') + '|' + shownLocked.map((u) => u.id).join(',');
     if (key !== upgOrderKey) { // membership changed: re-slot rows (rare; appendChild moves nodes)
       upgOrderKey = key;
       for (const r of upgRows.values()) setHidden(r.row, true);
-      for (const u of live) { const r = upgRow(u); setData(r.row, 'locked', '0'); upgLive.appendChild(r.row); setHidden(r.row, false); }
+      for (const u of liveMult) { const r = upgRow(u); setData(r.row, 'locked', '0'); upgLive.appendChild(r.row); setHidden(r.row, false); }
+      for (const u of liveMech) { const r = upgRow(u); setData(r.row, 'locked', '0'); upgMech.appendChild(r.row); setHidden(r.row, false); }
       for (const u of shownLocked) { const r = upgRow(u); setData(r.row, 'locked', '1'); upgLocked.appendChild(r.row); setHidden(r.row, false); }
       setHidden(upgEmpty, live.length > 0);
+      setHidden(upgMechTitle, liveMech.length === 0);
       setHidden(upgLockedTitle, shownLocked.length === 0);
     }
     for (const u of live) {
       const r = upgRows.get(u.id);
       setData(r.row, 'affordable', u.affordable ? '1' : '0');
       setText(r.cost, formatNumber(u.cost));
-      setText(r.info, r.effect || r.blurb);
+      // Mechanics show their full blurb (what it actually does), never the raw key/value.
+      setText(r.info, r.mechanic ? (r.blurb || r.effect) : (r.effect || r.blurb));
     }
     for (const u of shownLocked) {
       const r = upgRows.get(u.id);
@@ -442,14 +490,33 @@ export function createHUD(root, bus, api) {
     const P = TUNE.prestige;
     const now = performance.now();
     const cc = collapseCard;
-    const cAvail = !!snap.collapse.available;
+    const col = snap.collapse || {};
+    const cAvail = !!col.available;
+    const shardsTxt = formatNumber(col.shards || 0);
+    if (!cAvail) cc.armedUntil = 0;
+    const cArmed = cAvail && now < cc.armedUntil;
+    if (!cArmed && cc.armedUntil) cc.armedUntil = 0; // timer expired -> disarmed
     setData(cc.card, 'available', cAvail ? '1' : '0');
+    setData(cc.card, 'armed', cArmed ? '1' : '0');
     cc.card.setAttribute('aria-disabled', cAvail ? 'false' : 'true');
-    setText(cc.gain, '+' + formatNumber(snap.collapse.shards) + ' shards (each +' + formatNumber(P.shardGainPct * 100) + '% forever)');
-    setText(cc.note, 'Resets flux, injectors and upgrades. Keeps stage, shards, perks.');
-    if (!cAvail) setText(cc.reason, 'Unavailable: needs ' + formatNumber(P.shardDiv) + ' flux this run (now ' + formatNumber(snap.runFlux) + ')');
-    else setText(cc.reason, now < cc.armedUntil ? 'Click again to confirm' : 'Click to collapse');
-    setData(cc.card, 'armed', now < cc.armedUntil ? '1' : '0');
+    if (cAvail) {
+      // Line 1 = reward, line 2 = what it costs you.
+      setText(cc.t, cArmed ? 'CONFIRM — reset everything for +' + shardsTxt : 'COLLAPSE  +' + shardsTxt + ' Shards');
+      setText(cc.gain, collapseLossText(snap));
+      setText(cc.note, 'Each Shard +' + formatNumber(P.shardGainPct * 100) + '% flux forever. Keeps stage, shards, perks.');
+      setText(cc.reason, cArmed ? 'click again to collapse' : (collapsedThisSession ? 'Click to collapse' : 'Click to collapse (asks to confirm)'));
+    } else {
+      setText(cc.t, 'COLLAPSE');
+      setText(cc.gain, '');
+      setText(cc.note, 'Resets flux, injectors and upgrades. Keeps stage, shards, perks.');
+      setText(cc.reason, 'Unavailable: needs ' + formatNumber(P.shardDiv) + ' flux this run (now ' + formatNumber(snap.runFlux) + ')');
+    }
+    setHidden(cc.gain, !cAvail);
+    // Teach it once: the first time a collapse becomes available for a player who has never collapsed.
+    if (cAvail && !collapseCoached) {
+      collapseCoached = true;
+      if (!(snap.collapses > 0)) { try { bus.emit(EVT.LOG, { text: COLLAPSE_COACH }); } catch { /* coaching is optional */ } }
+    }
 
     const ac = ascendCard;
     const aAvail = !!snap.ascend.available;

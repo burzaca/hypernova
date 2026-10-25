@@ -1,6 +1,8 @@
-// One-shot PM data fix: densify the STAGES ladder (measured from tools/curve.js).
+// One-shot PM data fix: set the STAGES ladder from the measured curve (tools/curve.js at 6 CPS,
+// the researched average human click rate — see tune.js `sim`). Target arc at 6 CPS:
+// first form in ~15 s, then a form every 2-5 minutes, final form at ~35-40 minutes.
 import { readFileSync, writeFileSync } from 'node:fs';
-const NEW = [0, 120, 700, 4e3, 2.2e4, 1.2e5, 6e5, 3e6, 1.5e7, 7.5e7, 4e8, 2e9, 1e10, 5e10, 2.5e11];
+const NEW = [0, 9e4, 5e5, 1.5e6, 5e6, 2.5e7, 9e7, 1.8e8, 3.5e8, 7e8, 1.5e9, 6e9, 1e11, 1e12, 4e12];
 const p = 'src/core/content.js';
 let src = readFileSync(p, 'utf8');
 const start = src.indexOf('export const STAGES = [');

@@ -1,13 +1,15 @@
-// Prints the bot's totalFlux curve so stage thresholds can be set from data, not hope.
+// Prints the bot's flux curve so stage thresholds can be set from data, not hope.
+// Usage: node tools/curve.js [cps] [seed]   — cps models the player's real click rate.
 import { TUNE } from '../src/core/tune.js';
 import { EventBus } from '../src/core/events.js';
 import { mulberry32 } from '../src/core/math.js';
 import { formatNumber } from '../src/core/format.js';
 import * as eco from '../src/core/economy.js';
 
-const MARKS = [15, 30, 60, 90, 120, 180, 240, 300, 420, 600, 900, 1200, 1800, 2400, 3000, 3600];
+const MARKS = [10, 20, 30, 45, 60, 90, 120, 180, 240, 300, 420, 600, 720, 900, 1080, 1200, 1500, 1800, 2100, 2400, 2700, 3000, 3600];
+const CPS = Number(process.argv[2] || 6);   // 6 CPS = researched average player
 const DT = TUNE.sim.dt;
-const rng = mulberry32(Number(process.argv[2] || 42));
+const rng = mulberry32(Number(process.argv[3] || 42));
 const bus = new EventBus();
 let s = eco.createState(42);
 let snap = eco.snapshot(s);
@@ -43,7 +45,7 @@ function bestPurchase(s, snap) {
 
 while (clock < 3600) {
   pulseTimer += DT;
-  if (pulseTimer >= 1 / 6) { pulseTimer -= 1 / 6; eco.pulse(s, bus); }
+  if (pulseTimer >= 1 / CPS) { pulseTimer -= 1 / CPS; eco.pulse(s, bus); }
   const cs = eco.chargeState(s);
   if (cs.ready) eco.fireCharge(s, bus, (rng() - 0.5) * 2 * cs.window * 0.7);
   if (s.overdrive >= TUNE.overdrive.need && s.overdriveTimer <= 0) eco.triggerOverdrive(s, bus);
@@ -72,8 +74,8 @@ while (clock < 3600) {
       snap.upgrades.some((u) => u.unlocked && !u.owned && u.affordable)) ? 0 : stalledFor + 0.25;
   }
   while (next < MARKS.length && clock >= MARKS[next]) {
-    out.push(`t=${String(MARKS[next]).padStart(5)}s totalFlux=${formatNumber(s.totalFlux).padStart(9)} ` +
-      `runFlux=${formatNumber(s.runFlux).padStart(9)} rate=${formatNumber(eco.totalRate(s)).padStart(9)} ` +
+    out.push(`t=${String(MARKS[next]).padStart(5)}s lifetime=${formatNumber(s.lifetimeFlux).padStart(11)} ` +
+      `totalFlux=${formatNumber(s.totalFlux).padStart(9)} rate=${formatNumber(eco.totalRate(s)).padStart(9)} ` +
       `stage=${s.stageIndex} shards=${s.totalShards} cores=${s.cores} collapses=${s.collapses}`);
     next++;
   }

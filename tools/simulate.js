@@ -11,6 +11,8 @@ import * as eco from '../src/core/economy.js';
 const RUNS = Number(process.argv[2] || 1);
 const SEED = Number(process.argv[3] || 42);
 const MAXS = Number(process.argv[4] || 3600);
+// Optional 5th arg: pulse rate, used to calibrate the bot against a real player's report.
+const PULSE = Number(process.argv[5] || TUNE.sim.botPulseRate);
 const DT = TUNE.sim.dt;
 
 // How the bot plays, and why: a real incremental player buys the HIGHEST tier they can afford
@@ -66,7 +68,7 @@ function run(seed, maxSeconds) {
     const beforeStage = s.stageIndex;
     // click like an engaged player
     pulseTimer += DT;
-    if (pulseTimer >= 1 / TUNE.sim.botPulseRate) {
+    if (pulseTimer >= 1 / PULSE) {
       pulseTimer -= 1 / TUNE.sim.botPulseRate;
       eco.pulse(s, bus);
     }
@@ -111,7 +113,7 @@ function run(seed, maxSeconds) {
 
     eco.tick(s, DT, bus);
     for (let k = beforeStage + 1; k <= s.stageIndex; k++) {
-      if (t.stageTimes[k] === undefined) t.stageTimes[k] = clock;
+      if (t.stageTimes[k] === undefined) t.stageTimes[k] = { t: clock, life: s.lifetimeFlux };
     }
     if (s.stageIndex > beforeStage && t.firstStage === null) t.firstStage = clock;
     if (s.overdriveTimer > 0 && t.firstOverdrive === null) t.firstOverdrive = clock;
@@ -159,7 +161,7 @@ for (let i = 0; i < RUNS; i++) {
     failures.push(`run ${i + 1}: never reached an ascend in ${MAXS}s`);
   }
   for (const [atSec, minStages] of (PACING.minStagesBy || [])) {
-    const reached = t.stageTimes[minStages];
+    const reached = t.stageTimes[minStages]?.t;
     chk(`stage ${minStages} ${fmt(reached)} later than ${atSec}s`, reached !== undefined && reached <= atSec);
   }
 }
@@ -176,6 +178,14 @@ rows.forEach((t, i) => {
     formatNumber(t.finalFlux).padStart(12), formatNumber(t.rate).padStart(10),
   ].join(' '));
 });
+
+if (rows[0] && rows[0].stageTimes) {
+  console.log('\nstage ladder as reached by run 1 (this is what the player sees):');
+  const st = rows[0].stageTimes;
+  for (const k of Object.keys(st).map(Number).sort((a, b) => a - b)) {
+    console.log(`  stage ${String(k).padStart(2)}  at ${fmt(st[k].t).padStart(8)}   lifetimeFlux ${formatNumber(st[k].life)}`);
+  }
+}
 
 if (failures.length) {
   console.log('\nPACING CONTRACT FAILED:');

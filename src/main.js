@@ -10,7 +10,6 @@ import { createAudio } from './core/audio.js';
 
 const FIXED_DT = 1 / 120;
 const SNAP_HZ = 30;
-const HOLD_PPS = 8;          // pulses per second while the pointer is held down
 const MAX_PPS = 12;          // hard input cap so mashing cannot break the sim
 const RING_TARGET = 0;       // the ring's hit angle, shared with the renderer
 
@@ -31,8 +30,6 @@ let snap = null;
 let running = true;
 let saveTimer = 0;
 let pulseBudget = 0;
-let holding = false;
-let holdAcc = 0;
 let hudBroken = false;
 let sceneBroken = false;
 let coach = null;
@@ -131,11 +128,8 @@ function bindInput() {
   canvas.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     unlockAudio();
-    holding = true;
-    holdAcc = 0;
     doPulse();
   });
-  window.addEventListener('pointerup', () => { holding = false; });
   canvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     unlockAudio();
@@ -189,12 +183,8 @@ function frame(now) {
   if (dt > 0.25) dt = 0.25;              // tab was throttled: do not fast-forward the economy
 
   if (running) {
-    // input rate limiting
+    // input rate limiting — one pulse per deliberate press, capped so mashing cannot outrun design
     pulseBudget = Math.min(MAX_PPS / 60, pulseBudget + dt * MAX_PPS);
-    if (holding) {
-      holdAcc += dt;
-      while (holdAcc >= 1 / HOLD_PPS) { holdAcc -= 1 / HOLD_PPS; const g = eco.pulse(state, bus); if (g > 0) audio.pulse && audio.pulse(state.combo); }
-    }
 
     acc += dt;
     let steps = 0;
