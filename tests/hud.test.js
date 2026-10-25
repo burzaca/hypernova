@@ -90,6 +90,22 @@ describe('HUD', () => {
     assert.strictEqual(el.dataset.boost, '1');
   });
 
+  it('Space never buys from a focused row; Enter does, and a click leaves no focus behind', () => {
+    const d = dom();
+    const calls = [];
+    const hud = createHUD(document.getElementById('hud'), { on() {}, off() {}, emit() {} }, { buyInjector: (id) => { calls.push(id); return true; } });
+    hud.update({ flux: 100, rate: 1, combo: 0, comboMult: 1, overdrive: 0, overdriveTimer: 0, playSec: 0, stage: { name: 'S', progress: 0 }, injectors: [{ id: 'a', name: 'A', unlocked: true, affordable: true, owned: 0, cost: 10, rate: 1, bundle: 1 }], upgrades: [], ownedUpgrades: [], perks: [], collapse: {}, ascend: { available: false, cores: 0 }, stats: {}, shards: 0, totalShards: 0, cores: 0, collapses: 0, ascends: 0, totalFlux: 0, runFlux: 0, bestRate: 0, spent: 0, pulses: 0, crits: 0, perfects: 0 });
+    const row = document.querySelector('[data-injector="a"]');
+    assert.ok(row, 'the row must render');
+    row.focus();
+    row.dispatchEvent(new d.window.KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    assert.deepStrictEqual(calls, [], 'Space must not buy — the player is told Space is the charge ring');
+    row.dispatchEvent(new d.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    assert.deepStrictEqual(calls, ['a'], 'Enter must still activate the focused row');
+    row.click();
+    assert.notEqual(document.activeElement, row, 'a mouse click must not leave focus that captures the next key');
+  });
+
   it('update never throws with missing boons and collapse', () => {
     dom();
     const hud = createHUD(document.getElementById('hud'), { on() {}, off() {}, emit() {} }, {});

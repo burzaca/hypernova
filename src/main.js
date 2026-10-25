@@ -144,6 +144,9 @@ function bindInput() {
   });
   window.addEventListener('keydown', (e) => {
     if (e.repeat) return;
+    // Typing in the menu's import box must not fire the charge ring or mute the game.
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
     const k = e.key.toLowerCase();
     if (k === ' ' || k === 'enter') { e.preventDefault(); unlockAudio(); fire(); }
     else if (k === 'o') { unlockAudio(); api.toggleOverdrive(); }
@@ -176,6 +179,8 @@ const api = {
   importSave: (text) => { const s = eco.load(text); if (s) { state = s; save(); return true; } return false; },
   saveNow: () => { save(); },
   resetSave: () => {
+    resetting = true;
+    running = false;
     try { localStorage.removeItem(TUNE.save.key); } catch (err) { /* storage may be blocked */ }
     window.location.href = window.location.pathname;
   },
@@ -183,7 +188,11 @@ const api = {
   canAscend: () => eco.canAscend(state),
 };
 
+let resetting = false;
 function save() {
+  // A reset deletes the save and then reloads — and the reload itself fires pagehide, whose save()
+  // would write the state straight back. Without this guard RESET can never take effect.
+  if (resetting) return;
   try {
     state.lastSave = Date.now();
     localStorage.setItem(TUNE.save.key, eco.save(state));

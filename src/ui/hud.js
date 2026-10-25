@@ -491,9 +491,17 @@ export function createHUD(root, bus, api) {
       if (kind === 'collapse') api.collapse(); else api.ascend();
     }
   }
-  const panelClick = (e) => activate(e.target);
+  const panelClick = (e) => {
+    activate(e.target);
+    // A mouse click must not leave keyboard focus on the row. That focus would capture the next
+    // Space or Enter and buy another level of it — the player heard "space = charge ring".
+    const ctl = e.target && e.target.closest ? e.target.closest('[role="button"]') : null;
+    if (ctl && typeof ctl.blur === 'function') ctl.blur();
+  };
   const panelKey = (e) => {
-    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role="button"]')) { e.preventDefault(); activate(e.target); }
+    // Enter activates a focused control. Space belongs to the charge ring only: a row clicked
+    // moments ago still holds focus, and Space firing both would buy a level for free.
+    if (e.key === 'Enter' && e.target.matches('[role="button"]')) { e.preventDefault(); activate(e.target); }
   };
   // Any click outside the armed collapse card disarms it.
   on(document, 'pointerdown', (e) => {
