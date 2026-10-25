@@ -11,5 +11,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # The HUD and renderer tests import jsdom and three; without this step they are absent and
+      # those two files fail with ERR_MODULE_NOT_FOUND while everything else passes.
+      - run: npm ci
       - run: node --test tests/*.test.js
       - run: node tools/simulate.js 1 42 3600
