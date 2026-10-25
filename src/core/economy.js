@@ -4,9 +4,9 @@
 // Every number that reaches the state goes through fin()/safeAdd(), so NaN/Infinity can never
 // leak into flux: a non-finite computation is clamped to 0 (or to Number.MAX_VALUE for costs)
 // and the game keeps going.
-import { INJECTORS, UPGRADES, STAGES, PERKS, ACHIEVEMENTS, getStage, stageThreshold } from './content.js';
+import { INJECTORS, UPGRADES, STAGES, PERKS, ACHIEVEMENTS, BOONS, getStage, stageThreshold } from './content.js';
 import { TUNE } from './tune.js';
-import { clamp } from './math.js';
+import { clamp, mulberry32 } from './math.js';
 import { EVT } from './events.js';
 
 const SAVE_VERSION = 1;
@@ -20,6 +20,7 @@ const UPG = arr(UPGRADES);
 const STG = arr(STAGES);
 const PRK = arr(PERKS);
 const ACH = arr(ACHIEVEMENTS);
+const BON = arr(BOONS);
 const byId = (rows) => {
   const m = new Map();
   for (const r of rows) if (!m.has(r.id)) m.set(r.id, r);
@@ -28,6 +29,8 @@ const byId = (rows) => {
 const INJ_BY_ID = byId(INJ);
 const UPG_BY_ID = byId(UPG);
 const PRK_BY_ID = byId(PRK);
+const BON_BY_ID = byId(BON);
+const BOON_OFFER_COUNT = 3;
 
 // ---------------------------------------------------------------- numeric guards ----------
 /** Finite number or fallback; also normalises -0 to 0 so JSON round-trips stay exact. */
@@ -70,6 +73,8 @@ export function createState(seed = 1) {
     overdrive: 0, overdriveTimer: 0, overdrives: 0,
     charge: { angle: 0, cooldown: 0, hits: 0, perfects: 0 },
     stageIndex: 0,
+    boons: {},        // owned Ascension Boon id -> true (permanent, survives every prestige)
+    boonOffers: [],   // boon ids offered right now; [] when no choice is pending
     stats: { pulses: 0, crits: 0, perfects: 0, playSec: 0, bestRate: 0, spent: 0 },
     lastSave: 0,
   };
@@ -141,6 +146,14 @@ function contributions(state, key) {
     const p = PRK_BY_ID.get(id);
     if (p && p.effect && p.effect.key === key) {
       const v = fin(p.effect.value, NaN);
+      if (Number.isFinite(v)) out.push(v);
+    }
+  }
+  for (const id of Object.keys(state.boons || {})) {
+    if (state.boons[id] !== true) continue;
+    const b = BON_BY_ID.get(id);
+    if (b && b.mods && typeof b.mods === 'object' && Object.prototype.hasOwnProperty.call(b.mods, key)) {
+      const v = fin(b.mods[key], NaN);
       if (Number.isFinite(v)) out.push(v);
     }
   }
@@ -479,7 +492,35 @@ export function doAscend(state, bus) {
   state.ascends = fin(state.ascends) + 1;
   if (wasOverdrive) emit(bus, EVT.OVERDRIVE_END, { reason: 'ascend' });
   emit(bus, EVT.ASCEND, { cores: gained, totalCores: state.cores, ascends: state.ascends });
+  // A new ascend always replaces an untouched offer.
+  state.boonOffers = rollBoonOffers(state);
   return state;
+}
+
+// ---------------------------------------------------------------- ascension boons -------
+/** Deterministic: same seed + same ascends => same ids (a reloaded save reproduces the offer).
+ *  Partial Fisher-Yates over the unowned boons in table order; [] when fewer than 3 remain. */
+function rollBoonOffers(state) {
+  const owned = state.boons || {};
+  const pool = BON.filter((b) => owned[b.id] !== true).map((b) => b.id);
+  if (pool.length < BOON_OFFER_COUNT) return [];
+  const rng = mulberry32(fin(state.seed, 1) + fin(state.ascends) * 7919);
+  for (let i = 0; i < BOON_OFFER_COUNT; i++) {
+    const j = i + Math.floor(rng() * (pool.length - i)) % (pool.length - i);
+    const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
+  }
+  return pool.slice(0, BOON_OFFER_COUNT);
+}
+/** Keep one of the offered boons. Returns false (and changes nothing) for any other id. */
+export function chooseBoon(state, bus, id) {
+  if (typeof id !== 'string' || !Array.isArray(state.boonOffers) || !state.boonOffers.includes(id)) return false;
+  const b = BON_BY_ID.get(id);
+  if (!b || (state.boons && state.boons[id] === true)) return false;
+  if (!isObj(state.boons)) state.boons = {};
+  state.boons[id] = true;
+  state.boonOffers = [];
+  emit(bus, EVT.BOON, { id, name: b.name });
+  return true;
 }
 // Auto-collapse (mechanic 'autoCollapse' > 0): collapse as soon as the pending gain is at least
 // max(1, autoCollapse, 25% of totalShards) — avoids pointless micro-collapses late in the game.
@@ -615,6 +656,11 @@ export function snapshot(state) {
   }));
   const shardsNow = shardsFor(state);
   const coresNow = coresFor(state);
+  const offers = (Array.isArray(state.boonOffers) ? state.boonOffers : [])
+    .map((id) => BON_BY_ID.get(id)).filter(Boolean)
+    .map((b) => ({ id: b.id, name: b.name || b.id, blurb: b.blurb || '', mods: { ...(b.mods || {}) } }));
+  const ownedBoons = BON.filter((b) => state.boons && state.boons[b.id] === true)
+    .map((b) => ({ id: b.id, name: b.name || b.id, blurb: b.blurb || '' }));
 
   return {
     flux, totalFlux: fin(state.totalFlux), runFlux: fin(state.runFlux), rate,
@@ -633,6 +679,7 @@ export function snapshot(state) {
     collapse: { available: shardsNow >= 1, shards: shardsNow },
     ascend: { available: canAscend(state), cores: coresNow },
     charge: chargeState(state),
+    boons: { offers, owned: ownedBoons, pending: offers.length > 0 },
     stats: { ...state.stats },
     playSec: fin(state.stats.playSec),
   };
@@ -674,6 +721,12 @@ export function load(text) {
   s.upgrades = trueMap(d.upgrades);
   s.perks = trueMap(d.perks);
   s.achievements = trueMap(d.achievements);
+  // Boons: only known ids survive; offers must be known, unowned and unique.
+  for (const id of Object.keys(trueMap(d.boons))) if (BON_BY_ID.has(id)) s.boons[id] = true;
+  if (Array.isArray(d.boonOffers)) {
+    s.boonOffers = [...new Set(d.boonOffers.filter((id) => typeof id === 'string'
+      && BON_BY_ID.has(id) && s.boons[id] !== true))].slice(0, BOON_OFFER_COUNT);
+  }
   if (isObj(d.charge)) {
     for (const k of Object.keys(s.charge)) s.charge[k] = Math.max(0, num(d.charge[k], 0));
   }

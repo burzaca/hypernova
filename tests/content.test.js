@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  INJECTORS, UPGRADES, STAGES, PERKS, ACHIEVEMENTS, MECHANIC_KEYS, getStage, stageThreshold,
+  INJECTORS, UPGRADES, STAGES, PERKS, ACHIEVEMENTS, MECHANIC_KEYS, BOONS, getStage, stageThreshold,
 } from '../src/core/content.js';
 import { createState, save, load, snapshot, tick, stageFor } from '../src/core/economy.js';
 
@@ -181,4 +181,31 @@ test('the advance loop climbs past the last authored stage', () => {
   st.lifetimeFlux = stageThreshold(22) * 2;
   tick(st, 0.1, null);
   assert.equal(st.stageIndex, 22);
+});
+
+// ---------------------------------------------------------------- ascension boons (ENDLESS.md §2)
+test('boon table: 12+ trades, unique ids, known keys only, every boon has a cost', () => {
+  assert.ok(Array.isArray(BOONS) && BOONS.length >= 12, 'at least 12 boons, got ' + (BOONS && BOONS.length));
+  const others = new Set([INJECTORS, UPGRADES, STAGES, PERKS, ACHIEVEMENTS].flat().map((r) => r.id));
+  const seen = new Set();
+  for (const b of BOONS) {
+    assert.match(b.id, ID, 'bad id ' + b.id);
+    assert.ok(!seen.has(b.id) && !others.has(b.id), 'duplicate id ' + b.id);
+    seen.add(b.id);
+    assert.ok(typeof b.name === 'string' && b.name.length > 1 && b.name.length < 40, 'name for ' + b.id);
+    assert.ok(typeof b.blurb === 'string' && b.blurb.length > 20, 'blurb for ' + b.id);
+    assert.ok(!/powerful|bonus!/i.test(b.blurb), 'blurb must say what changes: ' + b.id);
+    assert.ok(b.mods && typeof b.mods === 'object', 'mods for ' + b.id);
+    const keys = Object.keys(b.mods);
+    assert.ok(keys.length >= 2, 'a boon trades at least two things: ' + b.id);
+    for (const k of keys) {
+      assert.ok(MECHANIC_KEYS.includes(k), 'unknown mechanic key ' + k + ' on ' + b.id);
+      assert.ok(Number.isFinite(b.mods[k]) && b.mods[k] !== 0, 'mod value ' + k + ' on ' + b.id);
+    }
+    assert.ok(keys.some((k) => b.mods[k] < 0), 'boon needs at least one negative mod: ' + b.id);
+    assert.ok(keys.some((k) => b.mods[k] > 0), 'boon needs at least one upside: ' + b.id);
+    // mechanicValue reads a fluxMult contribution 0 < v < 1 as a bonus and ignores v <= 0, so
+    // fluxMult cannot be the cost side of a boon.
+    if ('fluxMult' in b.mods) assert.ok(b.mods.fluxMult >= 1, 'fluxMult must be >= 1 on ' + b.id);
+  }
 });

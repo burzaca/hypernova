@@ -63,6 +63,35 @@ function upgradeEffect(u) {
 // What a collapse takes away, computed from the snapshot only.
 // The economy omits already-bought upgrades from snapshot.upgrades (it lists what can still be
 // bought), so owned upgrades = content ids missing from that list, plus any flagged owned === true.
+// Ascension Boon mods, rendered honestly (both signs, real units). Unknown keys fall back to
+// "key +v" so a new mechanic can never render as blank.
+const MINUS = '\u2212';
+const signed = (v, digits = 0) => (v < 0 ? MINUS : '+') + formatNumber(Number(Math.abs(v).toFixed(digits)));
+const BOON_MOD_LABEL = {
+  autoPulse: (v) => 'Auto-pulse ' + signed(v) + '/s',
+  overdriveMult: (v) => 'Overdrive peak ' + signed(v) + '\u00d7',
+  overdriveDuration: (v) => 'Overdrive duration ' + signed(v) + 's',
+  critMult: (v) => 'Crit multiplier ' + signed(v, 1),
+  chainSurge: (v) => 'Chain orbs ' + signed(v),
+  comboRetention: (v) => 'Combo retention ' + signed(v * 100) + '%',
+  chargeWindow: (v) => 'Ring window ' + signed(v * 100) + '%',
+  offlineFrac: (v) => 'Offline share ' + signed(v * 100) + '%',
+  fluxMult: (v) => 'All flux ' + formatMult(v),
+  autoCollapse: (v) => (v > 0 ? 'Auto-collapse on' : 'Auto-collapse off'),
+};
+function boonModParts(mods) {
+  const out = [];
+  if (!mods || typeof mods !== 'object') return out;
+  for (const k of Object.keys(mods)) {
+    const v = Number(mods[k]);
+    if (!Number.isFinite(v) || v === 0) continue;
+    const label = BOON_MOD_LABEL[k] ? BOON_MOD_LABEL[k](v) : k + ' ' + signed(v, 2);
+    // fluxMult >= 1 is always an upside; everything else follows the sign.
+    out.push({ text: label, good: k === 'fluxMult' ? v >= 1 : v > 0 });
+  }
+  return out;
+}
+
 function collapseLossText(snap) {
   let n = 0, levels = 0;
   for (const inj of (Array.isArray(snap.injectors) ? snap.injectors : [])) {
@@ -182,7 +211,18 @@ export function createHUD(root, bus, api) {
   const ascendCard = prestigeCard('ascend', 'ASCEND');
   const shardLine = el('div', 'currency-line', '');
   const perkList = el('div', 'perk-list');
-  tabBodies.prestige.append(collapseCard.card, ascendCard.card, shardLine, el('div', 'sub-title', 'PERKS (spend shards)'), perkList);
+  // Ascension Boons: the offer panel (only while a choice is pending) sits above the prestige
+  // cards; the owned list sits under the perks so the player can see the rules of this run.
+  const boonPanel = el('div', 'boon-panel');
+  boonPanel.hidden = true;
+  const boonOfferList = el('div', 'boon-offers');
+  boonPanel.append(el('div', 'sub-title boon-title', 'CHOOSE A BOON'),
+    el('div', 'boon-note', 'Pick one — it changes the rules for every run from now on. No rush: keep playing and decide later.'),
+    boonOfferList);
+  const boonOwnedTitle = el('div', 'sub-title', 'BOONS');
+  boonOwnedTitle.hidden = true;
+  const boonOwnedList = el('div', 'boon-owned');
+  tabBodies.prestige.append(boonPanel, collapseCard.card, ascendCard.card, shardLine, el('div', 'sub-title', 'PERKS (spend shards)'), perkList, boonOwnedTitle, boonOwnedList);
 
   // stats tab + save
   const statsGrid = el('dl', 'stats-grid');
@@ -286,6 +326,61 @@ export function createHUD(root, bus, api) {
     return r;
   }
 
+  // Boon offer cards: 3 fixed slots, rewritten when the offer changes (rare).
+  const boonSlots = [];
+  for (let i = 0; i < 3; i++) {
+    const row = el('div', 'boon-row');
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
+    row.hidden = true;
+    const name = el('span', 'boon-name', '');
+    const blurb = el('span', 'boon-blurb', '');
+    const mods = el('span', 'boon-mods', '');
+    row.append(name, blurb, mods);
+    boonOfferList.appendChild(row);
+    boonSlots.push({ row, name, blurb, mods });
+  }
+  const boonOwnedRows = new Map();
+  function boonOwnedRow(b) {
+    let r = boonOwnedRows.get(b.id);
+    if (r) return r;
+    const row = el('div', 'boon-owned-row');
+    row.append(el('span', 'boon-name', b.name), el('span', 'boon-blurb', b.blurb || ''));
+    boonOwnedList.appendChild(row);
+    r = { row };
+    boonOwnedRows.set(b.id, r);
+    return r;
+  }
+  let boonOfferKey = '';
+  function renderBoons(snap) {
+    const bn = snap.boons && typeof snap.boons === 'object' ? snap.boons : { offers: [], owned: [], pending: false };
+    const offers = Array.isArray(bn.offers) ? bn.offers : [];
+    const pending = !!bn.pending && offers.length > 0;
+    setHidden(boonPanel, !pending);
+    setData(tabBtns.prestige, 'boon', pending ? '1' : '0');
+    const key = offers.map((o) => o.id).join(',');
+    if (key !== boonOfferKey) {
+      boonOfferKey = key;
+      boonSlots.forEach((slot, i) => {
+        const o = offers[i];
+        setHidden(slot.row, !o);
+        if (!o) { delete slot.row.dataset.boon; return; }
+        slot.row.dataset.boon = o.id;
+        setText(slot.name, o.name);
+        setText(slot.blurb, o.blurb);
+        slot.mods.textContent = '';
+        for (const m of boonModParts(o.mods)) {
+          const chip = el('span', 'boon-mod', m.text);
+          chip.dataset.good = m.good ? '1' : '0';
+          slot.mods.appendChild(chip);
+        }
+      });
+    }
+    const owned = Array.isArray(bn.owned) ? bn.owned : [];
+    setHidden(boonOwnedTitle, owned.length === 0);
+    for (const b of owned) boonOwnedRow(b);
+  }
+
   // ------------------------------------------------------------ input (all read `latest`)
   function activate(target) {
     if (!latest || !target) return;
@@ -301,6 +396,13 @@ export function createHUD(root, bus, api) {
       const id = upgEl.dataset.upgrade;
       const u = latest.upgrades.find((x) => x.id === id);
       if (u && u.unlocked) api.buyUpgrade(id);
+      return;
+    }
+    const boonEl = target.closest('[data-boon]');
+    if (boonEl && boonEl.classList.contains('boon-row')) {
+      const id = boonEl.dataset.boon;
+      const offers = latest.boons && Array.isArray(latest.boons.offers) ? latest.boons.offers : [];
+      if (offers.some((o) => o.id === id) && api.chooseBoon) api.chooseBoon(id);
       return;
     }
     const perkEl = target.closest('[data-perk]');
@@ -400,6 +502,7 @@ export function createHUD(root, bus, api) {
     toast('Collapsed: +' + formatNumber((p && p.shards) || 0) + ' shards');
   });
   onBus(EVT.ASCEND, (p) => toast('Ascended: +' + formatNumber((p && p.cores) || 0) + ' cores'));
+  onBus(EVT.BOON, (p) => toast('Boon taken: ' + ((p && p.name) || '')));
 
   // ------------------------------------------------------------ per-frame render
   let upgOrderKey = '';
@@ -539,6 +642,8 @@ export function createHUD(root, bus, api) {
         setText(r.info, req ? requirementText(p.id) : (p.blurb || ''));
       } else setText(r.info, p.blurb || '');
     }
+
+    renderBoons(snap);
 
     // stats
     const s = snap.stats || {};

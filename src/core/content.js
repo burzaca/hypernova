@@ -200,3 +200,47 @@ export function getStage(index) {
   stageCache.set(i, s);
   return s;
 }
+
+// ---------------------------------------------------------------- ascension boons --------
+// Offered 3 at a time after every ASCEND; the player keeps one (docs/ENDLESS.md §2). A boon is
+// a trade, never a strict improvement: every entry carries at least one negative mod, and every
+// blurb states both sides. Mods ride economy.contributions(), so they combine exactly like
+// upgrades/perks — additive keys add, comboRetention/chargeWindow/offlineFrac sum then clamp to
+// [0, 0.9] (a negative there cancels bonuses, it cannot go below the base), and fluxMult is only
+// ever used with values >= 1 (mechanicValue reads 0 < v < 1 as a bonus, so it cannot be a cost).
+// Reference ceilings from the other tables: overdriveMult 8 base (+6 max), overdriveDuration 12 s
+// base (+12 max), chainSurge 2 max, autoPulse 5 max, offlineFrac 0.5 base (0.9 cap).
+export const BOONS = [
+  { id: 'boon_autonomic_core', name: 'Autonomic Core', mods: { autoPulse: 2, overdriveMult: -3 },
+    blurb: 'The core pulses itself 2 times a second. Overdrive peak is 3 lower (x8 becomes x5).' },
+  { id: 'boon_glass_heart', name: 'Glass Heart', mods: { critMult: 4, comboRetention: -0.5, overdriveDuration: -3 },
+    blurb: 'Ring crits get +4 crit multiplier (5x on a fresh run). Combo retention -50% and overdrive 3 s shorter.' },
+  { id: 'boon_long_burn', name: 'Long Burn', mods: { overdriveDuration: 12, overdriveMult: -4 },
+    blurb: 'Overdrive lasts 12 s longer (12 s becomes 24 s). Its peak is 4 lower (x8 becomes x4).' },
+  { id: 'boon_wide_ring', name: 'Wide Ring', mods: { chargeWindow: 0.5, chainSurge: -3, critMult: -0.3 },
+    blurb: 'Charge-ring hit window 50% wider. Chain Surge is switched off and crits lose 0.3 multiplier.' },
+  { id: 'boon_dormant_star', name: 'Dormant Star', mods: { offlineFrac: 0.4, overdriveMult: -16 },
+    blurb: 'Time away credits 40% more of your rate (capped at 90%). Overdrive gives no bonus at all, even fully upgraded.' },
+  { id: 'boon_long_breath', name: 'Long Breath', mods: { comboRetention: 0.6, chargeWindow: -0.5, critMult: -0.5 },
+    blurb: 'Combo decays 60% slower. Ring-window bonuses are cut by 50% and crits lose 0.5 multiplier.' },
+  { id: 'boon_overclock', name: 'Overclock', mods: { fluxMult: 2, offlineFrac: -0.9 },
+    blurb: 'All flux x2 while you play. Offline progress is switched off entirely.' },
+  { id: 'boon_hair_trigger', name: 'Hair Trigger', mods: { overdriveMult: 6, overdriveDuration: -8 },
+    blurb: 'Overdrive peak 6 higher (x8 becomes x14). It lasts 8 s less (12 s becomes 4 s).' },
+  { id: 'boon_chain_reactor', name: 'Chain Reactor', mods: { chainSurge: 3, critMult: -0.5, comboRetention: -0.3 },
+    blurb: 'Every crit fires 3 extra chain orbs (+150% crit flux). Crits lose 0.5 multiplier and combo retention -30%.' },
+  { id: 'boon_idle_engine', name: 'Idle Engine', mods: { autoPulse: 4, critMult: -0.7, chargeWindow: -0.3 },
+    blurb: 'The core pulses itself 4 times a second. Crits lose 0.7 multiplier and ring-window bonuses -30%.' },
+  { id: 'boon_patient_collapse', name: 'Patient Collapse', mods: { autoCollapse: 1, offlineFrac: -0.3, overdriveDuration: -3 },
+    blurb: 'The star collapses on its own when the shard gain is worth it (still resets injectors and upgrades). Offline share -30%, overdrive 3 s shorter.' },
+  { id: 'boon_manual_override', name: 'Manual Override', mods: { critMult: 2, chargeWindow: 0.3, autoPulse: -10 },
+    blurb: 'Crits +2 multiplier and ring window 30% wider. All auto-pulse is switched off, from upgrades, perks and boons alike.' },
+  { id: 'boon_heavy_core', name: 'Heavy Core', mods: { fluxMult: 3, critMult: -0.8, chainSurge: -3 },
+    blurb: 'All flux x3. Ring crits are nearly worthless (-0.8 multiplier) and Chain Surge is switched off.' },
+  { id: 'boon_ember_memory', name: 'Ember Memory', mods: { comboRetention: 0.9, overdriveDuration: -6 },
+    blurb: 'Combo almost never decays (retention maxed at 90%). Overdrive lasts 6 s less.' },
+  { id: 'boon_quiet_orbit', name: 'Quiet Orbit', mods: { autoPulse: 1, offlineFrac: 0.25, overdriveMult: -5 },
+    blurb: 'The core pulses itself once a second and time away credits 25% more. Overdrive peak is 5 lower.' },
+  { id: 'boon_tempest', name: 'Tempest', mods: { chainSurge: 2, overdriveDuration: 6, offlineFrac: -0.5 },
+    blurb: 'Crits fire 2 extra chain orbs and overdrive lasts 6 s longer. Offline share -50% (zero without other offline bonuses).' },
+];

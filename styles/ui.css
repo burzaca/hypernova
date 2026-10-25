@@ -405,3 +405,36 @@
 #hud .hud-col, #hud .hud-meters, #hud .toasts { pointer-events: none; }
 #hud .panel, #hud button, #hud .injector-row, #hud [data-injector], #hud .locked-ghost,
 #hud .upgrade-row, #hud .perk-row, #hud textarea { pointer-events: auto; }
+
+/* ---------------------------------------------------------------- ascension boons */
+.boon-panel {
+  margin: 0 0 10px;
+  padding: 6px 8px 8px;
+  border: 1px solid var(--hn-accent);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.boon-panel[hidden], .boon-row[hidden] { display: none; }
+.boon-title { color: var(--hn-accent); padding-top: 2px; }
+.boon-note { font-size: 11px; color: var(--hn-dim); margin-bottom: 6px; }
+.boon-offers { display: flex; flex-direction: column; gap: 6px; }
+.boon-row, .boon-owned-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.25);
+}
+.boon-row { cursor: pointer; box-shadow: inset 3px 0 0 var(--hn-accent); }
+.boon-row:hover, .boon-row:focus-visible { background: rgba(255, 255, 255, 0.08); border-color: var(--hn-accent); outline: none; }
+.boon-name { font-weight: 600; }
+.boon-blurb { font-size: 12px; color: var(--hn-dim); }
+.boon-mods { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.boon-mod { font: 11px ui-monospace, monospace; padding: 1px 6px; border-radius: 4px; }
+.boon-mod[data-good="1"] { color: #7fe39a; background: rgba(127, 227, 154, 0.12); }
+.boon-mod[data-good="0"] { color: #ff9a85; background: rgba(255, 106, 74, 0.12); }
+.boon-owned { display: flex; flex-direction: column; gap: 4px; }
+.boon-owned-row { opacity: 0.8; padding: 5px 8px; }
+.tab-btn[data-boon="1"]::after { content: ' \2022'; color: var(--hn-accent); }

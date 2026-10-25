@@ -159,6 +159,7 @@ const api = {
   buyPerk: (id) => { unlockAudio(); return eco.buyPerk(state, bus, id); },
   collapse: () => { state = eco.doCollapse(state, bus); return true; },
   ascend: () => { state = eco.doAscend(state, bus); return true; },
+  chooseBoon: (id) => eco.chooseBoon(state, bus, id),
   toggleOverdrive: () => eco.triggerOverdrive(state, bus),
   toggleMute: () => { audio.setEnabled(!audio.isEnabled()); return audio.isEnabled(); },
   isMuted: () => audio.isEnabled() === false,

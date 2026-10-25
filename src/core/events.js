@@ -11,6 +11,7 @@ export const EVT = {
   STAGE_UP: 'stage_up',
   COLLAPSE: 'collapse',
   ASCEND: 'ascend',
+  BOON: 'boon',
   ACHIEVEMENT: 'achievement',
   MILESTONE: 'milestone',
   LOG: 'log',
