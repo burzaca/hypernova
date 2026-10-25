@@ -107,3 +107,43 @@ test('the snapshot reports owned upgrades and the live click value', () => {
   assert.ok(plain > 0, 'a pulse must be worth something');
   assert.ok(boosted > plain * 5, 'overdrive must multiply the click value');
 });
+
+test('buy multiplier: x1/x10/x100 buys that many levels at the true bundle price', () => {
+  const s = eco.createState({ seed: 23 });
+  const bus = new EventBus();
+  s.flux = 1e12; s.totalFlux = 1e12; s.runFlux = 1e12; s.lifetimeFlux = 1e12;
+
+  // The bundle price must equal the sum of buying one at a time — no hidden discount, no lie.
+  const id = 'ion_spark';
+  let sum = 0;
+  for (let i = 0; i < 10; i++) { sum += eco.injectorCost(s, id); eco.buyInjector(s, bus, id, 1); }
+  s.injectors[id] = 0;
+  const bundle = eco.bundleCost(s, id, 10);
+  assert.ok(Math.abs(bundle - sum) / sum < 1e-9, 'bundleCost must match ten single buys (' + bundle + ' vs ' + sum + ')');
+
+  assert.ok(eco.buyInjector(s, bus, id, 10), 'a 10-bundle must be affordable at 1e12 flux');
+  assert.strictEqual(s.injectors[id], 10, 'exactly 10 levels must be added');
+
+  // Unaffordable bundle buys nothing rather than a partial, so the shown price is never a lie.
+  s.flux = 1;
+  const before = s.injectors[id];
+  assert.strictEqual(eco.buyInjector(s, bus, id, 100), false);
+  assert.strictEqual(s.injectors[id], before);
+
+  // The preference is validated and reported, and the shop price follows it.
+  assert.strictEqual(eco.setBuyMult(s, 100), 100);
+  assert.strictEqual(eco.setBuyMult(s, 7), 1, 'an unknown multiplier must fall back to 1');
+  eco.setBuyMult(s, 10);
+  const snap = eco.snapshot(s);
+  assert.strictEqual(snap.buyMult, 10);
+  const row = snap.injectors.find((x) => x.id === id);
+  assert.strictEqual(row.bundle, 10);
+  assert.strictEqual(row.cost, eco.bundleCost(s, id, 10));
+  assert.ok(row.singleCost < row.cost, 'the single price must stay lower than the bundle price');
+
+  // It survives a save round-trip, and an older save without the field defaults to 1.
+  const loaded = eco.load(eco.save(s));
+  assert.strictEqual(eco.buyMultOf(loaded), 10);
+  const legacy = eco.load(JSON.stringify({ v: 1, state: { ...s, buyMult: undefined } }));
+  assert.strictEqual(eco.buyMultOf(legacy), 1);
+});

@@ -78,6 +78,7 @@ export function createState(seed = 1) {
     stageIndex: 0,
     boons: {},        // owned Ascension Boon id -> true (permanent, survives every prestige)
     boonOffers: [],   // boon ids offered right now; [] when no choice is pending
+    buyMult: 1,       // shop preference: levels bought per click (1/10/100). Not balance.
     stats: { pulses: 0, crits: 0, perfects: 0, playSec: 0, bestRate: 0, spent: 0 },
     lastSave: 0,
   };
@@ -415,14 +416,43 @@ function checkStage(state, bus) {
 }
 
 // ---------------------------------------------------------------- purchases -------------
-export function buyInjector(state, bus, id) {
+export const BUY_MULTS = [1, 10, 100];
+
+// Price of buying k levels at once. Costs grow geometrically, so the bundle is the geometric sum —
+// buying 10 is meaningfully cheaper in clicks than buying 1 ten times, and the HUD must show the
+// true total rather than cost x10.
+export function bundleCost(state, id, k) {
+  const inj = INJ_BY_ID.get(id);
+  if (!inj) return Number.MAX_VALUE;
+  const n = Math.max(1, Math.floor(num(k, 1)));
+  const first = injectorCost(state, id);
+  if (!(first < Number.MAX_VALUE)) return Number.MAX_VALUE;
+  const g = num(inj.costGrowth, 1);
+  if (n === 1 || !(g > 0) || g === 1) return first * n;
+  const c = first * (Math.pow(g, n) - 1) / (g - 1);
+  return Number.isFinite(c) ? Math.max(0, c) : Number.MAX_VALUE;
+}
+
+// The shop's buy multiplier is a preference, not balance: it never changes prices, only how many
+// levels one click buys. Validated against BUY_MULTS so a hand-edited save cannot invent a value.
+export function setBuyMult(state, m) {
+  const v = BUY_MULTS.includes(Number(m)) ? Number(m) : 1;
+  state.buyMult = v;
+  return v;
+}
+export function buyMultOf(state) {
+  return BUY_MULTS.includes(Number(state && state.buyMult)) ? Number(state.buyMult) : 1;
+}
+
+export function buyInjector(state, bus, id, qty) {
   const inj = INJ_BY_ID.get(id);
   if (!inj || !injectorUnlocked(state, inj)) return false;
-  const cost = injectorCost(state, id);
+  const n = Math.max(1, Math.floor(num(qty, 1)));
+  const cost = bundleCost(state, id, n);
   if (!(cost < Number.MAX_VALUE) || fin(state.flux) < cost) return false;
   spend(state, cost);
-  state.injectors[id] = fin(state.injectors[id]) + 1;
-  emit(bus, EVT.BUY, { type: 'injector', id, owned: state.injectors[id], cost });
+  state.injectors[id] = fin(state.injectors[id]) + n;
+  emit(bus, EVT.BUY, { type: 'injector', id, owned: state.injectors[id], count: n, cost });
   return true;
 }
 function upgradeUnlocked(state, u) {
@@ -656,12 +686,14 @@ export function snapshot(state) {
   // Nova rows appear only once the family is visible (first ascend), so a fresh game lists
   // exactly the base family; the HUD teases the locked NOVA section from the content table.
   const injectors = INJ.filter((inj) => familyVisible(state, inj)).map((inj) => {
-    const cost = injectorCost(state, inj.id);
+    const qty = buyMultOf(state);
+    const cost = bundleCost(state, inj.id, qty);
     const unlocked = injectorUnlocked(state, inj);
     return {
       id: inj.id, name: inj.name, tier: num(inj.tier, 0), family: inj.family,
       requiresAscends: num(inj.requires && inj.requires.ascends, 0),
       owned: fin(state.injectors[inj.id]), cost, unlockAt: num(inj.unlockAt, 0),
+      bundle: qty, singleCost: injectorCost(state, inj.id),
       rate: injectorRateInner(state, inj.id, gm),
       affordable: unlocked && flux >= cost, unlocked, blurb: inj.blurb || '',
     };
@@ -704,6 +736,7 @@ export function snapshot(state) {
     // rate, so without this the HUD cannot show those two multipliers doing anything at all.
     pulseValue: pulseGain(state),
     combo: fin(state.combo), comboMult: comboMult(state), comboTimer: fin(state.comboTimer),
+    buyMult: buyMultOf(state),
     overdrive: fin(state.overdrive),
     overdriveTimer: fin(state.overdriveTimer),
     stage: {
@@ -773,6 +806,8 @@ export function load(text) {
     for (const k of Object.keys(s.stats)) s.stats[k] = Math.max(0, num(d.stats[k], 0));
   }
   s.stageIndex = STG.length ? Math.max(0, Math.floor(fin(s.stageIndex))) : 0;
+  // The shop preference is validated, never trusted: an older save simply gets the default.
+  s.buyMult = BUY_MULTS.includes(Number(d.buyMult)) ? Number(d.buyMult) : 1;
   s.overdrive = clamp(s.overdrive, 0, num(TUNE.overdrive.need, 100));
   s.combo = Math.min(s.combo, num(TUNE.combo.maxCombo, 50));
   return s;

@@ -178,11 +178,14 @@ no references into the live state):
 {
   flux, totalFlux, runFlux, rate,                       // rate = totalRate(state)
   combo, comboMult, comboTimer,
+  buyMult,                                             // shop preference: 1 | 10 | 100
+  pulseValue,                                          // what ONE click is worth right now
   overdrive,                                           // 0..TUNE.overdrive.need
   overdriveTimer,                                      // >0 while active
   stage: { index, id, name, palette, bloom, orbit, camDist, detail, nextAt, progress },
-  injectors: [ { id, name, tier, owned, cost, rate, baseRate, affordable, unlocked, blurb } ],
-  upgrades:  [ { id, name, kind, target, cost, affordable, unlocked, owned, blurb, mult, mechanic } ],
+  injectors: [ { id, name, tier, family, owned, cost, bundle, singleCost, rate, baseRate, affordable, unlocked, blurb } ],
+  upgrades:  [ { id, name, kind, target, cost, affordable, unlocked, blurb, mult, mechanic } ],  // shop only: never contains owned upgrades
+  ownedUpgrades: [ { id, name, kind, mult, mechanic, blurb } ],                                  // what the player already has
   perks:     [ { id, name, cost, affordable, owned, blurb } ],
   shards, totalShards, cores, ascends, collapses,
   collapse: { available, shards }, ascend: { available, cores },
@@ -190,6 +193,17 @@ no references into the live state):
   stats, playSec
 }
 ```
+
+Two rules the UI depends on, learned the hard way:
+
+- `cost` on an injector row is the price of the **whole selected bundle** (`bundle` levels), and
+  `affordable` is judged against that same total. `singleCost` is exposed so the UI can show the
+  unit price if it wants to. A price that does not match what the click will do is a lie.
+- `upgrades` is the shop and omits owned entries; anything that reports what the player *has*
+  (the OWNED list, the collapse warning) must read `ownedUpgrades`. Counting the shop list said
+  "0 upgrades" to a player who owned several.
+- `pulseValue` exists because combo and overdrive multiply **clicks**, not the passive `rate`.
+  Without a visible click value those two mechanics look like they do nothing at all.
 
 Behaviour the economy worker owns:
 - Production: `flux += totalRate(state) * dt`; `totalFlux`/`runFlux` track every gain.

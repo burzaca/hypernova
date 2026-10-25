@@ -143,6 +143,26 @@ export function createHUD(root, bus, api) {
 
   // injector shop
   const shop = el('div', 'panel shop');
+  // Buy multiplier: one click buys 1, 10 or 100 levels. It is a preference, never a discount —
+  // the row always shows the true total price for that many levels.
+  const buyMultBar = el('div', 'buy-mult');
+  buyMultBar.setAttribute('role', 'group');
+  buyMultBar.setAttribute('aria-label', 'Levels bought per click');
+  const buyMultBtns = {};
+  for (const m of (Array.isArray(api.buyMults) && api.buyMults.length ? api.buyMults : [1, 10, 100])) {
+    const b = el('button', 'buy-mult-btn', 'x' + m);
+    b.type = 'button';
+    b.dataset.mult = String(m);
+    b.title = 'Buy ' + m + ' level' + (m === 1 ? '' : 's') + ' per click';
+    buyMultBar.appendChild(b);
+    buyMultBtns[m] = b;
+  }
+  on(buyMultBar, 'click', (e) => {
+    const b = e.target.closest('[data-mult]');
+    if (b && api.setBuyMult) api.setBuyMult(Number(b.dataset.mult));
+  });
+  const shopTitle = el('div', 'panel-title shop-title');
+  shopTitle.append(el('span', 'shop-title-label', 'INJECTORS'), buyMultBar);
   const shopList = el('div', 'shop-list');
   const lockedGhost = el('div', 'locked-ghost');
   lockedGhost.hidden = true;
@@ -155,7 +175,7 @@ export function createHUD(root, bus, api) {
   const novaList = el('div', 'shop-list nova-list');
   const novaGhost = el('div', 'locked-ghost nova-ghost', 'LOCKED until your first ASCEND');
   novaSection.append(el('div', 'sub-title nova-title', 'NOVA'), novaNote, novaBonus, novaList, novaGhost);
-  shop.append(el('div', 'panel-title', 'INJECTORS'), shopList, lockedGhost, novaSection);
+  shop.append(shopTitle, shopList, lockedGhost, novaSection);
 
   // toasts
   const toasts = el('div', 'toasts');
@@ -578,6 +598,8 @@ export function createHUD(root, bus, api) {
       setData(fluxPulse, 'boost', snap.overdriveTimer > 0 ? '1' : '0');
     }
     const odActive = snap.overdriveTimer > 0;
+    const bm = Number(snap.buyMult) || 1;
+    for (const m of Object.keys(buyMultBtns)) setData(buyMultBtns[m], 'on', Number(m) === bm ? '1' : '0');
     setText(fluxMult, 'combo ' + formatMult(snap.comboMult) + (odActive ? '  ·  overdrive ' + formatMult(TUNE.overdrive.mult) : ''));
 
     // stage
@@ -613,7 +635,10 @@ export function createHUD(root, bus, api) {
       }
       r.lastOwned = inj.owned;
       setText(r.rate, formatRate(inj.rate));
-      setText(r.cost, 'cost ' + formatNumber(inj.cost));
+      // The price shown is the real total for the selected bundle, never a single-unit price
+      // multiplied in the player's head.
+      const bundle = Math.max(1, Number(inj.bundle) || 1);
+      setText(r.cost, (bundle > 1 ? 'x' + bundle + ' for ' : 'cost ') + formatNumber(inj.cost));
     }
     if (nextLocked) {
       setHidden(lockedGhost, false);

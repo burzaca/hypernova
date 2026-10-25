@@ -17,11 +17,14 @@ synthesised. Runs from a static folder — open `index.html` on any static serve
 
 ## Play
 
-- **Click / hold the core** — inject a pulse. Keep the rhythm and your COMBO multiplier climbs.
+- **Click the core** — one pulse per click, no holding. Keep the rhythm and your COMBO climbs.
+  The top-left shows what a single click is worth; it is the number combo and overdrive move.
 - **SPACE / right-click** — fire the charge ring when the marker crosses the bright arc.
   Dead centre = PERFECT (×2, and the screen notices).
 - **O** — trigger OVERDRIVE when the meter is full.
-- **M** — mute. **P** — pause.
+- **M** — mute. **P** — pause. **ESC** — the menu (save, export, import, reset).
+- The shop buys **x1 / x10 / x100** at a time; pick it in the shop header. The price shown is the
+  real total for that many levels — the multiplier is convenience, never a discount.
 
 Progress is saved locally; offline production is credited when you come back.
 

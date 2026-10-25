@@ -161,7 +161,9 @@ function unlockAudio() {
 
 // ---------------------------------------------------------------- api for the UI
 const api = {
-  buyInjector: (id) => { unlockAudio(); return eco.buyInjector(state, bus, id); },
+  buyInjector: (id) => { unlockAudio(); return eco.buyInjector(state, bus, id, eco.buyMultOf(state)); },
+  setBuyMult: (m) => eco.setBuyMult(state, m),
+  buyMults: eco.BUY_MULTS,
   buyUpgrade: (id) => { unlockAudio(); return eco.buyUpgrade(state, bus, id); },
   buyPerk: (id) => { unlockAudio(); return eco.buyPerk(state, bus, id); },
   collapse: () => { state = eco.doCollapse(state, bus); return true; },
