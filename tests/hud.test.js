@@ -40,8 +40,10 @@ describe('HUD', () => {
   it('collapse line with owned injectors and upgrades', () => {
     dom();
     const hud = createHUD(document.getElementById('hud'), { on() {}, off() {}, emit() {} }, {});
-    hud.update({ flux: 0, rate: 0, combo: 0, comboMult: 1, overdrive: 0, overdriveTimer: 0, playSec: 0, stage: { name: 'S', progress: 0 }, injectors: [{ id: 'i1', name: 'I', unlocked: true, affordable: false, owned: 5 }, { id: 'i2', name: 'I2', unlocked: true, affordable: false, owned: 2 }, { id: 'i3', name: 'I3', unlocked: true, affordable: false, owned: 1 }], upgrades: [{ id: 'u1', name: 'U', unlocked: true, affordable: false, owned: true, kind: 'mult', cost: 0 }], perks: [], collapse: { available: true, shards: 1 }, ascend: { available: false, cores: 0 }, stats: {}, shards: 0, totalShards: 0, cores: 0, collapses: 0, ascends: 0, totalFlux: 0, runFlux: 0, bestRate: 0, spent: 0, pulses: 0, crits: 0, perfects: 0 });
+    hud.update({ flux: 0, rate: 0, combo: 0, comboMult: 1, overdrive: 0, overdriveTimer: 0, playSec: 0, stage: { name: 'S', progress: 0 }, injectors: [{ id: 'i1', name: 'I', unlocked: true, affordable: false, owned: 5 }, { id: 'i2', name: 'I2', unlocked: true, affordable: false, owned: 2 }, { id: 'i3', name: 'I3', unlocked: true, affordable: false, owned: 1 }], upgrades: [], ownedUpgrades: [{ id: 'u1', name: 'U', kind: 'global_mult', mult: 2 }], perks: [], collapse: { available: true, shards: 1 }, ascend: { available: false, cores: 0 }, stats: {}, shards: 0, totalShards: 0, cores: 0, collapses: 0, ascends: 0, totalFlux: 0, runFlux: 0, bestRate: 0, spent: 0, pulses: 0, crits: 0, perfects: 0 });
     assert.ok(document.body.innerHTML.includes('resets 3 injectors (8 levels)'));
+    // The shop list never contains owned upgrades, so the count has to come from ownedUpgrades.
+    assert.ok(document.body.innerHTML.includes('1 upgrades'));
   });
 
   it('nothing to lose yet', () => {
@@ -63,6 +65,29 @@ describe('HUD', () => {
     assert.strictEqual(slots.length, 2); // only the two offered boons render, not empty placeholders
     slots[0].click();
     assert.deepStrictEqual(calls, ['b1']);
+  });
+
+  it('owned upgrades stay visible in the upgrades tab', () => {
+    dom();
+    const hud = createHUD(document.getElementById('hud'), { on() {}, off() {}, emit() {} }, {});
+    hud.update({ flux: 0, rate: 0, combo: 0, comboMult: 1, overdrive: 0, overdriveTimer: 0, playSec: 0, stage: { name: 'S', progress: 0 }, injectors: [], upgrades: [], ownedUpgrades: [{ id: 'field_harmony', name: 'Field Harmony', kind: 'global_mult', mult: 1.5, blurb: 'x1.5 all flux' }], perks: [], collapse: {}, ascend: { available: false, cores: 0 }, stats: {}, shards: 0, totalShards: 0, cores: 0, collapses: 0, ascends: 0, totalFlux: 0, runFlux: 0, bestRate: 0, spent: 0, pulses: 0, crits: 0, perfects: 0 });
+    const owned = document.querySelector('.upg-owned');
+    assert.ok(owned, 'an OWNED section must exist');
+    assert.strictEqual(owned.hidden, false);
+    assert.ok(owned.textContent.includes('Field Harmony'), 'the purchase must stay visible');
+  });
+
+  it('the per-pulse readout reflects overdrive', () => {
+    dom();
+    const hud = createHUD(document.getElementById('hud'), { on() {}, off() {}, emit() {} }, {});
+    const base = { flux: 10, rate: 4, combo: 0, comboMult: 1, overdrive: 0, overdriveTimer: 0, playSec: 0, stage: { name: 'S', progress: 0 }, injectors: [], upgrades: [], ownedUpgrades: [], perks: [], collapse: {}, ascend: { available: false, cores: 0 }, stats: {}, shards: 0, totalShards: 0, cores: 0, collapses: 0, ascends: 0, totalFlux: 0, runFlux: 0, bestRate: 0, spent: 0, pulses: 0, crits: 0, perfects: 0 };
+    hud.update({ ...base, pulseValue: 10 });
+    const el = document.querySelector('.flux-pulse');
+    assert.ok(el, 'the click value must be shown');
+    assert.ok(el.textContent.includes('per pulse 10'));
+    hud.update({ ...base, pulseValue: 80, overdriveTimer: 5 });
+    assert.ok(el.textContent.includes('per pulse 80'), 'the shown value must follow the engine');
+    assert.strictEqual(el.dataset.boost, '1');
   });
 
   it('update never throws with missing boons and collapse', () => {

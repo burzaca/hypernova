@@ -691,6 +691,18 @@ export function snapshot(state) {
 
   return {
     flux, totalFlux: fin(state.totalFlux), runFlux: fin(state.runFlux), rate,
+    // The `upgrades` list above is the shop and omits owned upgrades. Owned ones are reported here
+    // instead: the player must be able to see what he bought, and the collapse warning has to count
+    // them from this list rather than from a shop list that never contains them.
+    ownedUpgrades: UPG.filter((u) => state.upgrades[u.id] === true).map((u) => ({
+      id: u.id, name: u.name || u.id, kind: u.kind,
+      mult: typeof u.mult === 'number' ? fin(u.mult, 1) : null,
+      mechanic: u.mechanic ? { key: u.mechanic.key, value: fin(u.mechanic.value) } : null,
+      blurb: u.blurb || '',
+    })),
+    // What one click is worth right now. Combo and overdrive act on clicks, not on the passive
+    // rate, so without this the HUD cannot show those two multipliers doing anything at all.
+    pulseValue: pulseGain(state),
     combo: fin(state.combo), comboMult: comboMult(state), comboTimer: fin(state.comboTimer),
     overdrive: fin(state.overdrive),
     overdriveTimer: fin(state.overdriveTimer),

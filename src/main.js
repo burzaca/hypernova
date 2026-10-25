@@ -236,4 +236,9 @@ function frame(now) {
   }
 }
 
+// Debug/testing hook. `state` is reassigned by collapse/ascend, so it must be read through a getter.
+Object.defineProperty(window, 'hypernova', {
+  value: { api, get state() { return state; }, get snapshot() { return snap; } },
+});
+
 boot().catch(fail);

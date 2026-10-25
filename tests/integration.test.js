@@ -84,3 +84,26 @@ test('save round-trips through JSON', () => {
   assert.equal(eco.load('not json'), null);
   assert.equal(eco.load(JSON.stringify({ v: 999 })), null);
 });
+
+test('the snapshot reports owned upgrades and the live click value', () => {
+  const s = eco.createState({ seed: 11 });
+  const bus = new EventBus();
+  s.flux = 1e9; s.totalFlux = 1e9; s.runFlux = 1e9; s.lifetimeFlux = 1e9;
+  const shop = eco.snapshot(s).upgrades.filter((u) => u.unlocked && u.affordable);
+  assert.ok(shop.length > 0, 'there must be something to buy at 1e9 flux');
+  const id = shop[0].id;
+  assert.ok(eco.buyUpgrade(s, bus, id), 'the purchase must succeed');
+  const after = eco.snapshot(s);
+  // An owned upgrade must leave the shop list and appear in the owned list. It used to appear in
+  // neither, which is why the collapse warning said "0 upgrades" to a player who owned several.
+  assert.ok(!after.upgrades.some((u) => u.id === id), 'owned upgrade must not stay in the shop');
+  assert.ok(after.ownedUpgrades.some((u) => u.id === id), 'owned upgrade must be reported');
+  // The click value is real and overdrive multiplies it — combo and overdrive act on clicks, not
+  // on the passive rate, so this is the number the HUD has to show for them to be felt at all.
+  const plain = eco.pulseGain(s);
+  s.overdriveTimer = 5;
+  const boosted = eco.snapshot(s).pulseValue;
+  s.overdriveTimer = 0;
+  assert.ok(plain > 0, 'a pulse must be worth something');
+  assert.ok(boosted > plain * 5, 'overdrive must multiply the click value');
+});

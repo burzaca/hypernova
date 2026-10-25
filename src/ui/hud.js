@@ -31,29 +31,39 @@ function setData(n, k, v) { if (n.dataset[k] !== v) n.dataset[k] = v; }
 function setHidden(n, h) { if (n.hidden !== h) n.hidden = h; }
 function pct(x) { return formatNumber(Math.floor(x * 100)) + '%'; }
 
+// Requirements are actions the player can take, so they are phrased as verbs: "needs 10 Ion Spark"
+// reads like a crafting recipe, and the player looked for a source that does not exist.
 const REQ_LABEL = {
-  totalFlux: (v) => formatNumber(v) + ' total flux',
-  collapses: (v) => formatNumber(v) + (v === 1 ? ' collapse' : ' collapses'),
-  ascends: (v) => formatNumber(v) + (v === 1 ? ' ascend' : ' ascends'),
-  pulses: (v) => formatNumber(v) + ' pulses',
-  crits: (v) => formatNumber(v) + ' crits',
-  perfects: (v) => formatNumber(v) + ' perfects',
-  overdrives: (v) => formatNumber(v) + ' overdrives',
-  stageIndex: (v) => 'stage ' + formatNumber(v + 1),
-  injectorsTotal: (v) => formatNumber(v) + ' injectors',
-  upgradesOwned: (v) => formatNumber(v) + ' upgrades',
-  playSec: (v) => formatTime(v) + ' played',
+  totalFlux: (v) => 'reach ' + formatNumber(v) + ' total flux',
+  collapses: (v) => 'perform ' + formatNumber(v) + (v === 1 ? ' collapse' : ' collapses'),
+  ascends: (v) => 'perform ' + formatNumber(v) + (v === 1 ? ' ascend' : ' ascends'),
+  pulses: (v) => 'reach ' + formatNumber(v) + ' pulses',
+  crits: (v) => 'land ' + formatNumber(v) + ' crits',
+  perfects: (v) => 'land ' + formatNumber(v) + ' perfects',
+  overdrives: (v) => 'run ' + formatNumber(v) + ' overdrives',
+  stageIndex: (v) => 'reach stage ' + formatNumber(v + 1),
+  injectorsTotal: (v) => 'own ' + formatNumber(v) + ' injectors',
+  upgradesOwned: (v) => 'buy ' + formatNumber(v) + ' upgrades',
+  playSec: (v) => 'play for ' + formatTime(v),
 };
-function requirementText(id) {
+function requirementText(id, snap) {
   const req = REQ.get(id);
   if (!req) return 'locked';
   const parts = [];
-  if (req.injector) parts.push(formatNumber(req.count != null ? req.count : 1) + ' ' + (INJ_NAME.get(req.injector) || req.injector));
+  if (req.injector) {
+    // Say the action and show the progress: "10 Ion Spark" alone reads like a crafting material,
+    // and the shop counter it refers to (x0) is easy to miss.
+    const need = req.count != null ? req.count : 1;
+    const list = Array.isArray(snap && snap.injectors) ? snap.injectors : [];
+    const have = list.reduce((a, x) => (x && x.id === req.injector ? Math.max(0, Number(x.owned) || 0) : a), 0);
+    parts.push('buy ' + formatNumber(need) + ' ' + (INJ_NAME.get(req.injector) || req.injector) +
+      ' in the shop (' + formatNumber(have) + '/' + formatNumber(need) + ')');
+  }
   for (const k of Object.keys(req)) {
     if (k === 'injector' || k === 'count' || typeof req[k] !== 'number') continue;
     parts.push(REQ_LABEL[k] ? REQ_LABEL[k](req[k]) : formatNumber(req[k]) + ' ' + k);
   }
-  return parts.length ? 'needs ' + parts.join(', ') : 'locked';
+  return parts.length ? 'locked until you ' + parts.join(' and ') : 'locked';
 }
 function upgradeEffect(u) {
   if (u.kind === 'injector_mult' && u.mult != null) return formatMult(u.mult) + ' one injector';
@@ -100,11 +110,7 @@ function collapseLossText(snap) {
     const o = Number(inj && inj.owned) || 0;
     if (o > 0) { n += 1; levels += o; }
   }
-  const listed = Array.isArray(snap.upgrades) ? snap.upgrades : [];
-  // Count only what the snapshot says is owned. An earlier version counted ids that were *absent*
-  // from the snapshot as owned, which is backwards: with a partial or empty list it claimed the
-  // whole upgrade table would be lost. Unknown is not the same as owned.
-  const u = listed.filter((x) => x && x.owned === true).length;
+  const u = (Array.isArray(snap.ownedUpgrades) ? snap.ownedUpgrades : []).length;
   if (n === 0 && u === 0) return 'nothing to lose yet';
   return 'resets ' + formatNumber(n) + ' injectors (' + formatNumber(levels) + ' levels) · ' + formatNumber(u) + ' upgrades';
 }
@@ -129,8 +135,11 @@ export function createHUD(root, bus, api) {
   const fluxBlock = el('div', 'panel flux-block');
   const fluxValue = el('div', 'flux-value', '0');
   const fluxRate = el('div', 'flux-rate', '');
+  // Combo and overdrive multiply *clicks*, not the passive rate, so the rate line alone makes them
+  // look like they do nothing. This line is the click value, and it visibly moves with both.
+  const fluxPulse = el('div', 'flux-pulse', 'per pulse 1');
   const fluxMult = el('div', 'flux-mult', '');
-  fluxBlock.append(el('div', 'flux-label', 'FLUX'), fluxValue, fluxRate, fluxMult);
+  fluxBlock.append(el('div', 'flux-label', 'FLUX'), fluxValue, fluxRate, fluxPulse, fluxMult);
 
   // injector shop
   const shop = el('div', 'panel shop');
@@ -204,7 +213,12 @@ export function createHUD(root, bus, api) {
   const upgMech = el('div', 'upg-mech');
   const upgLockedTitle = el('div', 'sub-title', 'COMING UP');
   const upgLocked = el('div', 'upg-locked');
-  tabBodies.upgrades.append(upgEmpty, upgLive, upgMechTitle, upgMech, upgLockedTitle, upgLocked);
+  // Owned upgrades used to disappear from the UI entirely once bought, so the player could not see
+  // what he had, and the collapse warning ("0 upgrades") contradicted what he believed.
+  const upgOwnedTitle = el('div', 'sub-title owned-title', 'OWNED — lost when you collapse');
+  const upgOwned = el('div', 'upg-owned');
+  upgOwnedTitle.hidden = true;
+  tabBodies.upgrades.append(upgEmpty, upgLive, upgOwnedTitle, upgOwned, upgMechTitle, upgMech, upgLockedTitle, upgLocked);
 
   // prestige tab
   function prestigeCard(kind, title) {
@@ -318,6 +332,21 @@ export function createHUD(root, bus, api) {
     row.append(name, cost, info);
     r = { row, name, cost, info, mechanic: u.kind === 'mechanic', effect: upgradeEffect(u), blurb: u.blurb || '' };
     upgRows.set(u.id, r);
+    return r;
+  }
+
+  const ownedRows = new Map();
+  function ownedRow(u) {
+    let r = ownedRows.get(u.id);
+    if (r) return r;
+    const row = el('div', 'upgrade-row owned');
+    row.dataset.upgrade = u.id;
+    const name = el('span', 'upg-name', u.name);
+    const mark = el('span', 'upg-owned-mark', 'owned');
+    const info = el('span', 'upg-info', u.blurb || upgradeEffect(u));
+    row.append(name, mark, info);
+    r = { row, info };
+    ownedRows.set(u.id, r);
     return r;
   }
 
@@ -544,6 +573,10 @@ export function createHUD(root, bus, api) {
     // flux
     setText(fluxValue, formatNumber(snap.flux));
     setText(fluxRate, formatRate(snap.rate));
+    if (typeof snap.pulseValue === 'number') {
+      setText(fluxPulse, 'per pulse ' + formatNumber(snap.pulseValue));
+      setData(fluxPulse, 'boost', snap.overdriveTimer > 0 ? '1' : '0');
+    }
     const odActive = snap.overdriveTimer > 0;
     setText(fluxMult, 'combo ' + formatMult(snap.comboMult) + (odActive ? '  ·  overdrive ' + formatMult(TUNE.overdrive.mult) : ''));
 
@@ -570,7 +603,15 @@ export function createHUD(root, bus, api) {
       }
       setHidden(r.row, false);
       setData(r.row, 'affordable', inj.affordable ? '1' : '0');
+      // The counter is the only proof a purchase worked, and a quiet x0 -> x1 is easy to miss.
+      const prevOwned = r.lastOwned || 0;
       setText(r.owned, 'x' + formatNumber(inj.owned));
+      if (inj.owned > prevOwned) {
+        r.owned.classList.remove('bump');
+        void r.owned.offsetWidth; // restart the animation
+        r.owned.classList.add('bump');
+      }
+      r.lastOwned = inj.owned;
       setText(r.rate, formatRate(inj.rate));
       setText(r.cost, 'cost ' + formatNumber(inj.cost));
     }
@@ -596,6 +637,13 @@ export function createHUD(root, bus, api) {
         ? 'next: LOCKED until ASCEND #' + formatNumber(need)
         : 'next: LOCKED at ' + formatNumber(nextNova.unlockAt) + ' flux');
     } else setHidden(novaGhost, true);
+
+    // owned (what the player already has — it must stay visible, not vanish on purchase)
+    const owned = Array.isArray(snap.ownedUpgrades) ? snap.ownedUpgrades : [];
+    setHidden(upgOwnedTitle, owned.length === 0);
+    setHidden(upgOwned, owned.length === 0);
+    for (const r of ownedRows.values()) setHidden(r.row, true);
+    for (const u of owned) { const r = ownedRow(u); upgOwned.appendChild(r.row); setHidden(r.row, false); }
 
     // upgrades (D6): unlocked rows live, next three locked rows greyed with requirement
     const upgList = Array.isArray(snap.upgrades) ? snap.upgrades : [];
@@ -629,7 +677,7 @@ export function createHUD(root, bus, api) {
       const r = upgRows.get(u.id);
       setData(r.row, 'affordable', '0');
       setText(r.cost, formatNumber(u.cost));
-      setText(r.info, requirementText(u.id));
+      setText(r.info, requirementText(u.id, snap));
     }
 
     // prestige (D7)

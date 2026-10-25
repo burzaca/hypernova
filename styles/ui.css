@@ -452,3 +452,31 @@
 .boon-owned { display: flex; flex-direction: column; gap: 4px; }
 .boon-owned-row { opacity: 0.8; padding: 5px 8px; }
 .tab-btn[data-boon="1"]::after { content: ' \2022'; color: var(--hn-accent); }
+
+/* ------------------------------------------------------------ click value (player feedback) */
+/* Combo and overdrive multiply clicks, not the passive rate. This line is where the player can
+   actually see them working; it lights up for the duration of an overdrive. */
+.flux-pulse { font: 600 0.95rem ui-monospace, monospace; color: var(--hn-dim); }
+.flux-pulse[data-boost="1"] { color: var(--hn-core); text-shadow: 0 0 12px var(--hn-glow); }
+
+/* A purchase needs to be felt: the counter is the only proof, and a quiet x0 -> x1 is missed. */
+.inj-owned.bump { display: inline-block; animation: hn-bump 0.45s ease-out; }
+@keyframes hn-bump {
+  0% { transform: scale(1.7); color: #fff; }
+  100% { transform: scale(1); }
+}
+
+/* Owned upgrades stay listed. Hiding them made purchases invisible and made the collapse warning
+   ("0 upgrades") read as a bug, because it contradicted what the player could see. */
+.sub-title.owned-title { color: #8fdcb0; }
+.upgrade-row.owned { cursor: default; opacity: 0.72; border-style: solid; border-color: rgba(120, 220, 165, 0.22); }
+.upgrade-row.owned:hover { background: transparent; }
+.upg-owned-mark {
+  font: 600 10px ui-monospace, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8fdcb0;
+  border: 1px solid rgba(120, 220, 165, 0.35);
+  border-radius: 999px;
+  padding: 1px 6px;
+}
