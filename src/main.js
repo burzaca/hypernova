@@ -36,6 +36,8 @@ let holdAcc = 0;
 let hudBroken = false;
 let sceneBroken = false;
 let coach = null;
+let hiddenAt = 0;
+let started = false;
 
 function fail(err) {
   console.error(err);
@@ -70,11 +72,23 @@ async function boot() {
   if (bootEl) bootEl.style.display = 'none';
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
+      hiddenAt = Date.now();
       running = false;
       save();
     } else {
+      // A backgrounded tab stops ticking; credit that time like an absence, so nobody loses
+      // progress by switching tabs.
+      if (hiddenAt) {
+        const away = (Date.now() - hiddenAt) / 1000;
+        if (away > 10) {
+          const gained = eco.applyOffline(state, away, bus);
+          if (gained > 0) bus.emit(EVT.LOG, { text: 'While you were away: +' + gained });
+        }
+        hiddenAt = 0;
+      }
       last = performance.now();
-      running = true;
+      acc = 0;
+      if (started) running = true;
     }
   });
   window.addEventListener('pagehide', save);
@@ -82,6 +96,7 @@ async function boot() {
   running = false;
   createTitleCard(() => {
     unlockAudio();
+    started = true;
     running = true;
     last = performance.now();
   });
