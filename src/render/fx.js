@@ -398,10 +398,10 @@ export function createFX(three, scene, bus) {
       // idle feeding trickle: a little life even when nobody clicks, scales with log(rate)
       const perSec = 6 + Math.min(30, Math.log10(1 + rate) * 3) + combo * 0.3 + (od ? 18 : 0);
       ambientAcc += perSec * dt;
-      while (ambientAcc >= 1) { ambientAcc -= 1; stream(1, 4, 7, 1.4, 0.55 + (od ? 0.3 : 0)); }
+      while (ambientAcc >= 1) { ambientAcc -= 1; stream(1, 4, 7, 1.4, 0.55 + (od ? 0.12 : 0)); }
       if (od) {
         speedAcc += 55 * dt;
-        while (speedAcc >= 1) { speedAcc -= 1; speedLines(1, 1.2); }
+        while (speedAcc >= 1) { speedAcc -= 1; speedLines(1, 0.85); }   // dimmer: they cross the ring
       } else speedAcc = 0;
     }
 

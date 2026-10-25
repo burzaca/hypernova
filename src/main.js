@@ -6,6 +6,8 @@ import * as eco from './core/economy.js';
 import { createHUD } from './ui/hud.js';
 import { createCoach } from './ui/onboarding.js';
 import { createTitleCard } from './ui/titlecard.js';
+import { createFloatingNumbers } from './ui/floating-numbers.js';
+import { createMenu } from './ui/menu.js';
 import { createAudio } from './core/audio.js';
 
 const FIXED_DT = 1 / 120;
@@ -33,6 +35,8 @@ let pulseBudget = 0;
 let hudBroken = false;
 let sceneBroken = false;
 let coach = null;
+let floats = null;
+let menu = null;
 let hiddenAt = 0;
 let started = false;
 
@@ -51,6 +55,9 @@ async function boot() {
   audio = createAudio(bus);
   hud = createHUD(hudRoot, bus, api);
   coach = createCoach(bus, api);
+  floats = createFloatingNumbers(bus);
+  floats.mount();
+  menu = createMenu(api, bus);
 
   // ?state=<json> loads a save straight from the URL: a debug hook and a "share my run" handle.
   const urlState = new URLSearchParams(location.search).get('state');
@@ -165,6 +172,11 @@ const api = {
   isMuted: () => audio.isEnabled() === false,
   exportSave: () => eco.save(state),
   importSave: (text) => { const s = eco.load(text); if (s) { state = s; save(); return true; } return false; },
+  saveNow: () => { save(); },
+  resetSave: () => {
+    try { localStorage.removeItem(TUNE.save.key); } catch (err) { /* storage may be blocked */ }
+    window.location.href = window.location.pathname;
+  },
   canCollapse: () => eco.canCollapse(state),
   canAscend: () => eco.canAscend(state),
 };

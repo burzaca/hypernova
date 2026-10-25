@@ -165,7 +165,14 @@ void main(){
   colr *= mix(0.55, 1.0, pow(ndv, 0.6));
   colr += uRim * fres * (0.55 + uIntensity * 0.3 + uHeat * 0.6);
   colr *= 0.6 + 0.4 * uIntensity;
+  // overdrive heat raises CONTRAST, not just level: cool cells sink, hot cells and veins climb,
+  // so the convection pattern stays readable at the peak
+  colr *= mix(1.0, 0.45 + 1.1 * m, uHeat * 0.7);
+  colr += mix(uCore, vec3(1.0), 0.3) * veins * uHeat * 0.35;
   colr += mix(uRim, vec3(1.0), 0.5) * uFlash * (0.15 + fres * 0.8);
+  // soft knee (hue-preserving): nothing runs away to a flat white plateau before tonemapping
+  float pk = max(colr.r, max(colr.g, colr.b));
+  if (pk > 1.0) colr *= (1.0 + (pk - 1.0) / (1.0 + (pk - 1.0) * 1.2)) / pk;
   gl_FragColor = vec4(colr, 1.0);
 #elif LAYER == 1
   // ---- SHELL (wispy corona) ----
@@ -236,15 +243,40 @@ export function coreMaterial(palette, opts = {}) {
 // ---------------------------------------------------------------------------
 // CHARGE RING — torus in its local XY plane. Game angle 0 (the target) is drawn at
 // 12 o'clock; the marker sweeps CLOCKWISE as snap.charge.angle increases.
-//   dim base track  |  bright HIT WINDOW arc  |  brighter PERFECT core  |  comet marker
+//   visible base track  |  FAT bright HIT WINDOW arc  |  white PERFECT core  |  bead marker
+// The vertex shader swells the tube where it matters (the hit arc ~2x, the marker ~3x), so the
+// two things the player must track read by SHAPE as well as by brightness. A dark backing band
+// (ringBackingMaterial) is drawn under the ring so it separates from nebula, orbits and halo.
 // ---------------------------------------------------------------------------
+const RING_COMMON = /* glsl */ `
+uniform float uAngle;      // marker angle (rad, already wrapped to 0..2pi)
+uniform float uWindow;     // half-width of hit window (rad)
+uniform float uRadius;     // torus major radius (matches the geometry)
+const float TAU = 6.28318530718;
+const float PI = 3.14159265359;
+float wrapPi(float a){ return a - TAU * floor((a + PI) / TAU); }
+// game angle of a torus u coordinate: 0 at top, clockwise
+float gameAngle(float u){ return PI * 0.5 - u * TAU; }
+float arcMask(float dz){ return 1.0 - smoothstep(uWindow - 0.02, uWindow + 0.02, dz); }
+float beadMask(float dm){ return exp(-dm * dm * 420.0); }
+vec3 swollen(vec3 p, float u, float k){
+  float th = u * TAU;
+  vec3 c = vec3(cos(th), sin(th), 0.0) * uRadius;      // tube centre line
+  return c + (p - c) * k;
+}
+`;
+
 const RING_VERT = /* glsl */ `
+${RING_COMMON}
 varying vec2 vUv;
 varying vec3 vNormalW;
 varying vec3 vPosW;
 void main(){
   vUv = uv;
-  vec4 world = modelMatrix * vec4(position, 1.0);
+  float g = gameAngle(uv.x);
+  float k = 1.0 + 0.9 * arcMask(abs(wrapPi(g))) + 1.9 * beadMask(wrapPi(g - uAngle));
+  vec3 p = swollen(position, uv.x, k);
+  vec4 world = modelMatrix * vec4(p, 1.0);
   vPosW = world.xyz;
   vNormalW = normalize(mat3(modelMatrix) * normal);
   gl_Position = projectionMatrix * viewMatrix * world;
@@ -252,9 +284,8 @@ void main(){
 `;
 
 const RING_FRAG = /* glsl */ `
+${RING_COMMON}
 uniform float uTime;
-uniform float uAngle;      // marker angle (rad, already wrapped to 0..2pi)
-uniform float uWindow;     // half-width of hit window (rad)
 uniform float uPerfect;    // perfectFrac
 uniform float uReady;      // 0..1 (eased)
 uniform float uInWindow;   // 0..1 marker currently inside the window
@@ -268,34 +299,31 @@ uniform vec3 uMarker;
 varying vec2 vUv;
 varying vec3 vNormalW;
 varying vec3 vPosW;
-const float TAU = 6.28318530718;
-const float PI = 3.14159265359;
-float wrapPi(float a){ return a - TAU * floor((a + PI) / TAU); }
 void main(){
   vec3 V = normalize(cameraPosition - vPosW);
   float ndv = clamp(abs(dot(normalize(vNormalW), V)), 0.0, 1.0);
-  float tubeCore = pow(ndv, 1.6);          // neon-tube: bright centre line, soft edges
-  float theta = vUv.x * TAU;               // geometric angle from +X, CCW
-  float g = PI * 0.5 - theta;              // game angle: 0 at top, clockwise
+  float tubeCore = pow(ndv, 1.4);          // neon-tube: bright centre line, soft edges
+  float g = gameAngle(vUv.x);
   float dz = abs(wrapPi(g));
-  float aa = 0.012;
-  float win  = 1.0 - smoothstep(uWindow - aa, uWindow + aa, dz);
+  float win  = arcMask(dz);
   float pw   = uWindow * uPerfect;
-  float perf = 1.0 - smoothstep(pw - aa * 0.6, pw + aa * 0.6, dz);
-  float edge = exp(-pow((dz - uWindow) * 90.0, 2.0));          // crisp window boundaries
-  float tick = exp(-pow(dz * 160.0, 2.0));                      // dead-centre tick
+  float perf = 1.0 - smoothstep(pw - 0.008, pw + 0.008, dz);
+  float edge = exp(-pow((dz - uWindow) * 70.0, 2.0));          // crisp window boundaries
   float dm = wrapPi(g - uAngle);           // <0 behind the marker
-  float head = exp(-dm * dm * 2600.0);
-  float tail = dm < 0.0 ? exp(dm * 3.2) : 0.0;  // fading comet tail
-  float ready = mix(0.32, 1.0, uReady);
-  float breathe = 0.85 + 0.15 * sin(uTime * 3.0);
-  float body = 0.35 + 0.65 * tubeCore;
-  vec3 c = uBase * 0.07 * body;                                          // dim track
-  c += uWin  * win  * (0.45 + 0.55 * uInWindow) * body * breathe;          // HIT window arc
-  c += mix(uPerf, vec3(1.0), 0.3) * perf * (0.7 + 0.9 * uInWindow) * body; // PERFECT core
-  c += uPerf * edge * 0.45 + vec3(1.0) * tick * 0.5;
+  float head = beadMask(dm);
+  float gap = exp(-pow((abs(dm) - 0.075) * 34.0, 2.0));        // dark notches either side of the bead
+  float tail = dm < 0.0 ? exp(dm * 3.2) : 0.0;                  // fading comet tail
+  float ready = mix(0.5, 1.0, uReady);
+  float breathe = 0.88 + 0.12 * sin(uTime * 3.0);
+  float body = 0.4 + 0.6 * tubeCore;
+  vec3 c = uBase * 0.14 * body;                                          // visible track
+  c += uWin  * win  * (0.8 + 0.7 * uInWindow) * body * breathe;          // HIT window arc
+  c += mix(uPerf, vec3(1.0), 0.5) * perf * (0.9 + 0.9 * uInWindow) * body; // PERFECT core
+  c += mix(uWin, vec3(1.0), 0.5) * edge * 0.9;                           // window end caps
   c *= ready;
-  c += uMarker * (head * 4.0 + tail * 0.5 * uReady) * body;
+  c *= 1.0 - 0.85 * gap;                                                 // carve the notches
+  c += uMarker * tail * 0.45 * uReady * body;
+  c += mix(uMarker, vec3(1.0), 0.6) * head * (2.2 + 1.2 * uInWindow) * body; // bead marker
   c += mix(uWin, vec3(1.0), 0.4) * uHit * (0.25 + win * 1.2);
   c += vec3(1.0) * uPerfHit * (0.4 + perf * 2.5);
   gl_FragColor = vec4(c * uOpacity, 1.0);
@@ -313,6 +341,7 @@ export function ringMaterial(palette) {
       uTime: { value: 0 },
       uAngle: { value: Math.PI },
       uWindow: { value: 0.22 },
+      uRadius: { value: 1.9 },
       uPerfect: { value: 0.25 },
       uReady: { value: 1 },
       uInWindow: { value: 0 },
@@ -330,6 +359,50 @@ export function ringMaterial(palette) {
     depthWrite: false,
     depthTest: true,
     blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+  });
+}
+
+const RING_BACK_VERT = /* glsl */ `
+${RING_COMMON}
+uniform float uWiden;      // backing band is this much fatter than the lit tube
+varying float vFade;
+void main(){
+  float g = gameAngle(uv.x);
+  float k = (1.0 + 0.9 * arcMask(abs(wrapPi(g))) + 1.9 * beadMask(wrapPi(g - uAngle))) * uWiden;
+  vec3 p = swollen(position, uv.x, k);
+  vFade = 1.0;
+  gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(p, 1.0);
+}
+`;
+const RING_BACK_FRAG = /* glsl */ `
+uniform float uAlpha;
+varying float vFade;
+void main(){ gl_FragColor = vec4(0.0, 0.0, 0.0, uAlpha * vFade); }
+`;
+
+/**
+ * Dark backing band for the charge ring (normal blending, drawn just before the ring).
+ * @param {object} [shared] ringMaterial().uniforms — angle/window/radius are SHARED so the
+ *   backing swells under the hit arc and the marker exactly like the lit tube.
+ */
+export function ringBackingMaterial(shared) {
+  const u = shared || {};
+  return new THREE.ShaderMaterial({
+    name: 'hypernova.ringBacking',
+    uniforms: {
+      uAngle: u.uAngle || { value: Math.PI },
+      uWindow: u.uWindow || { value: 0.22 },
+      uRadius: u.uRadius || { value: 1.9 },
+      uWiden: { value: 1.7 },
+      uAlpha: { value: 0.6 },
+    },
+    vertexShader: RING_BACK_VERT,
+    fragmentShader: RING_BACK_FRAG,
+    transparent: true,
+    depthWrite: false,
+    depthTest: true,
+    blending: THREE.NormalBlending,
     side: THREE.DoubleSide,
   });
 }

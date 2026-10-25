@@ -669,7 +669,9 @@ export function createHUD(root, bus, api) {
     setData(ac.card, 'available', aAvail ? '1' : '0');
     ac.card.setAttribute('aria-disabled', aAvail ? 'false' : 'true');
     setText(ac.gain, '+' + formatNumber(snap.ascend.cores) + ' cores (each ' + formatMult(1 + P.coreGainPct) + ' forever, compounding)');
-    setText(ac.note, 'Resets everything incl. total flux, shards and perks. Keeps stages and achievements.');
+    setText(ac.note, 'Resets everything incl. total flux, shards and perks. Keeps stages and achievements. '
+      + 'Cores are what you ascend FOR: each one is x' + formatMult(1 + P.coreGainPct) + ' on all flux forever, '
+      + 'they unlock the NOVA injector line, and every core raises what those NOVA producers output.');
     if (!aAvail) setText(ac.reason, 'Unavailable: needs ' + formatNumber(P.ascendAt) + ' total flux (now ' + formatNumber(snap.totalFlux) + ')');
     else setText(ac.reason, now < ac.armedUntil ? 'Click again to confirm' : 'Click to ascend');
     setData(ac.card, 'armed', now < ac.armedUntil ? '1' : '0');

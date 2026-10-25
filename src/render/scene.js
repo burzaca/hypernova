@@ -7,7 +7,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
-import { coreMaterial, ringMaterial, backgroundMaterial } from './shaders.js';
+import { coreMaterial, ringMaterial, ringBackingMaterial, backgroundMaterial } from './shaders.js';
 import { createFX } from './fx.js';
 import { EVT } from '../core/events.js';
 import { TUNE } from '../core/tune.js';
@@ -18,6 +18,11 @@ const MAX_PIXEL_RATIO = 1.75;
 const STAR_COUNT = 1200;        // + fx points 2400 + fx lines 160 = 3760 <= 4000
 const ORBIT_COUNT = 6;
 const RING_RADIUS = 1.9;
+const RING_TUBE = 0.05;          // base tube radius (the hit arc and the marker swell beyond this)
+const RING_EXTENT = 1.1;         // outer edge of the swollen arc+marker (tube x3.8), multiple of RING_RADIUS
+const CORE_SILHOUETTE = 1.22;    // glass shell radius = the visible edge of the core
+const CORE_FRAME = 0.55;         // core diameter cap, fraction of the viewport's smaller side
+const RING_FRAME = 0.86;         // whole-ring diameter cap (stage 0 sits at ~0.84 — unchanged)
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
 const EMPTY = Object.freeze({});
@@ -72,7 +77,8 @@ void main(){
   float d = wrapPi(th - uPhase);
   float head = exp(-d * d * 500.0);
   float tail = d < 0.0 ? exp(d * 2.2) : 0.0;
-  vec3 c = uColor * (0.04 + tail * 0.55 + head * 5.0) * uAlpha;
+  // comet heads stay modest so they never read as a second charge-ring marker
+  vec3 c = uColor * (0.04 + tail * 0.4 + head * 1.6) * uAlpha;
   gl_FragColor = vec4(c, 1.0);
 }
 `;
@@ -257,14 +263,24 @@ export function createScene(canvas, bus) {
   coreGroup.add(body); coreGroup.add(shell); coreGroup.add(glass);
 
   // ---------------- charge ring (always faces the camera so the timing is readable) ----------------
-  const ringGeo = new THREE.TorusGeometry(RING_RADIUS, 0.034, 20, 420);
+  // Always present from the first frame (never hidden); the camera framing floor in update()
+  // guarantees the whole ring, its hit arc and its marker stay on-screen at every stage.
+  const ringGeo = new THREE.TorusGeometry(RING_RADIUS, RING_TUBE, 20, 420);
   const ringMat = ringMaterial(null);
+  ringMat.uniforms.uRadius.value = RING_RADIUS;
   ringMat.uniforms.uBase.value = cur.glow;
   ringMat.uniforms.uWin.value = cur.accent;
   ringMat.uniforms.uPerf.value = cur.rim;
   ringMat.uniforms.uMarker.value = cMarker;
   const ring = new THREE.Mesh(ringGeo, ringMat);
   ring.renderOrder = 5;
+  ring.frustumCulled = false;
+  // dark gutter under the lit tube: separates ring/arc/marker from nebula, orbit lines and halo
+  const ringBackMat = ringBackingMaterial(ringMat.uniforms);
+  const ringBack = new THREE.Mesh(ringGeo, ringBackMat);
+  ringBack.renderOrder = 4.5;
+  ringBack.frustumCulled = false;
+  scene.add(ringBack);
   scene.add(ring);
 
   // ---------------- orbit bands ----------------
@@ -443,8 +459,11 @@ export function createScene(canvas, bus) {
     glass.rotation.y += vdt * 0.05;
     coreGroup.scale.setScalar(stageScale);
 
-    const intensity = 1 + comboBlend * 0.7 + odBlend * 0.45 + Math.min(J.flash, 2) * 0.1;
-    const disp = Math.min(0.2, 0.055 + stageIndex * 0.01) + odBlend * 0.06 + J.punch * 0.25;
+    // overdrive's emissive gain is modest: the peak is carried by heat (veins, rim, contrast) in the
+    // shader, not by a global multiplier that flattened the surface into one white disc
+    const intensity = 1 + comboBlend * 0.7 + odBlend * 0.25 + Math.min(J.flash, 2) * 0.1;
+    const dispBase = Math.min(0.2, 0.055 + stageIndex * 0.01) + odBlend * 0.06;
+    const disp = dispBase + J.punch * 0.25;
     const freq = Math.min(2.4, 1.3 + stageIndex * 0.07);
     bodyMat.uniforms.uTime.value = flowT;
     bodyMat.uniforms.uDisplace.value = disp;
@@ -460,7 +479,7 @@ export function createScene(canvas, bus) {
     shellMat.uniforms.uIntensity.value = intensity;
     shellMat.uniforms.uFlash.value = J.flash;
     shellMat.uniforms.uHeat.value = odBlend;
-    shellMat.uniforms.uOpacity.value = 0.55 + comboBlend * 0.35 + odBlend * 0.3;
+    shellMat.uniforms.uOpacity.value = Math.min(0.9, 0.55 + comboBlend * 0.35 + odBlend * 0.15);
     glassMat.uniforms.uTime.value = vTime;
     glassMat.uniforms.uPunch.value = J.punch * 0.4;
     glassMat.uniforms.uFlash.value = J.flash;
@@ -498,12 +517,25 @@ export function createScene(canvas, bus) {
     ru.uHit.value = J.ringHit;
     ru.uPerfHit.value = J.ringPerf;
     ring.scale.setScalar(stageScale * (1 + J.ringPerf * 0.05 + J.ringHit * 0.025));
+    ringBack.scale.copy(ring.scale);
+    ringBackMat.uniforms.uAlpha.value = 0.55 + odBlend * 0.15;   // overdrive haze is brighter
 
     // ---- camera: slow orbit, distance lerp, dolly, shake ----
     camDist = approach(camDist, Math.max(2.5, num(st.camDist, 6)), 1.2, realDt);
     azimuth += vdt * 0.05 * orbitSpeed * (1 + odBlend * 2.5);
     const elev = 0.2 + Math.sin(vTime * 0.045) * 0.14;
-    const dist = camDist * (1 - 0.12 * Math.min(J.dolly, 1.4)) * (1 - 0.1 * odBlend);
+    // Framing floor. Late stages ask for camDist 5.0 while stageScale grows to ~1.56x, which put the
+    // core at ~100% of the frame height and the charge ring entirely off-screen. Keep the stage's
+    // distance, but never come closer than the distance at which (a) the core silhouette spans
+    // CORE_FRAME of the viewport's smaller dimension and (b) the whole charge ring spans RING_FRAME.
+    // Early stages sit well outside both caps, so they are framed exactly as before.
+    const tanHalf = Math.tan((fov * Math.PI) / 360) * Math.min(1, camera.aspect || 1);
+    const coreR = stageScale * Math.max(CORE_SILHOUETTE, 1 + dispBase);
+    const ringR = stageScale * RING_RADIUS * RING_EXTENT;
+    const kc = CORE_FRAME * tanHalf;                     // sphere: tan(asin(R/d)) = kc
+    const dFit = Math.max(coreR * Math.sqrt(1 + 1 / (kc * kc)), ringR / (RING_FRAME * tanHalf));
+    const frameDist = Math.max(camDist * (1 - 0.1 * odBlend), dFit);
+    const dist = frameDist * (1 - 0.12 * Math.min(J.dolly, 1.4));
     camera.position.set(
       Math.sin(azimuth) * Math.cos(elev) * dist,
       Math.sin(elev) * dist,
@@ -512,6 +544,7 @@ export function createScene(canvas, bus) {
     camera.up.set(0, 1, 0);
     camera.lookAt(0, 0, 0);
     ring.quaternion.copy(camera.quaternion);           // ring faces the viewer, unrolled
+    ringBack.quaternion.copy(camera.quaternion);
     const targetFov = 45 + odBlend * 8 + Math.min(J.dolly, 1) * -2;
     if (Math.abs(targetFov - fov) > 0.01) {
       fov = approach(fov, targetFov, 5, realDt);
@@ -524,7 +557,7 @@ export function createScene(canvas, bus) {
       vRight.setFromMatrixColumn(camera.matrixWorld, 0);
       vUp.setFromMatrixColumn(camera.matrixWorld, 1);
       const t = realTime;
-      const amp = 0.16 * sh * (camDist / 6);
+      const amp = 0.16 * sh * (frameDist / 6);
       const sx = (Math.sin(t * 47.0) + Math.sin(t * 31.7 + 1.3) * 0.6) * amp;
       const sy = (Math.sin(t * 53.3 + 0.7) + Math.sin(t * 27.1 + 2.1) * 0.6) * amp;
       camera.position.addScaledVector(vRight, sx).addScaledVector(vUp, sy);
@@ -534,7 +567,7 @@ export function createScene(canvas, bus) {
     // ---- background + stars ----
     bgMat.uniforms.uTime.value = vTime;
     bgMat.uniforms.uPulse.value = J.bgPulse + Math.min(J.flash, 2) * 0.1;
-    bgMat.uniforms.uHeat.value = odBlend;
+    bgMat.uniforms.uHeat.value = odBlend * 0.6;   // keep the backdrop dark enough for the ring
     bgMat.uniforms.uOffset.value.set(Math.sin(azimuth) * 0.05, elev * 0.05);
     starMat.uniforms.uTime.value = vTime;
     starMat.uniforms.uBright.value = 1 + odBlend * 0.5;
@@ -555,10 +588,18 @@ export function createScene(canvas, bus) {
     // (early and mid stages move by a couple of percent) and put the overdrive delta back on top,
     // so the peak still reads as a peak instead of adding to an already saturated image.
     const softBase = (1.35 * bloomBase) / (bloomBase + 1.6);
-    const bTarget = 0.2 + softBase * 1.35 + odBlend * 0.45 + Math.min(J.flash, 2.5) * 0.12;
+    // Overdrive used to add +0.45 strength AND widen the radius 0.42 -> 0.62 on top of that base:
+    // the wide kernel smeared the whole disc into a white fog. Now the overdrive delta shrinks with
+    // the stage's bloom (less headroom = smaller delta), the radius barely widens, and the bloom
+    // threshold rises so only the genuinely hot pixels (veins, rim, ring) glow — the surface
+    // structure underneath stays crisp.
+    const headroom = clamp(1 - softBase / 0.9, 0.3, 1);
+    const bTarget = 0.2 + softBase * 1.35 + odBlend * 0.4 * headroom + Math.min(J.flash, 2.5) * 0.1;
     bloomStrength = approach(bloomStrength, bTarget, 8, realDt);
     bloom.strength = bloomStrength;
-    bloom.radius = 0.42 + odBlend * 0.2;
+    bloom.radius = 0.42 + odBlend * 0.05;
+    bloom.threshold = 0.85 + odBlend * 0.25;
+    renderer.toneMappingExposure = 1 - odBlend * 0.08;
     finalPass.uniforms.uAberr.value = 0.004 * J.aberr + 0.0025 * odBlend;
 
     firstFrame = false;
