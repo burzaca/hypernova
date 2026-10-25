@@ -549,7 +549,13 @@ export function createScene(canvas, bus) {
 
     // ---- post ----
     const bloomBase = num(st.bloom, 0.35);
-    const bTarget = 0.2 + bloomBase * 0.9 + odBlend * 0.3 + Math.min(J.flash, 2.5) * 0.1;
+    // The stage ladder raises `bloom` to 1.6, and the old linear formula turned that into 1.64 of
+    // bloom strength before overdrive was even on: at deep stages the star rendered as a flat white
+    // disc and lost both its surface detail and its palette. Compress the base with a soft ceiling
+    // (early and mid stages move by a couple of percent) and put the overdrive delta back on top,
+    // so the peak still reads as a peak instead of adding to an already saturated image.
+    const softBase = (1.35 * bloomBase) / (bloomBase + 1.6);
+    const bTarget = 0.2 + softBase * 1.35 + odBlend * 0.45 + Math.min(J.flash, 2.5) * 0.12;
     bloomStrength = approach(bloomStrength, bTarget, 8, realDt);
     bloom.strength = bloomStrength;
     bloom.radius = 0.42 + odBlend * 0.2;

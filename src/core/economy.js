@@ -4,7 +4,7 @@
 // Every number that reaches the state goes through fin()/safeAdd(), so NaN/Infinity can never
 // leak into flux: a non-finite computation is clamped to 0 (or to Number.MAX_VALUE for costs)
 // and the game keeps going.
-import { INJECTORS, UPGRADES, STAGES, PERKS, ACHIEVEMENTS, BOONS, getStage, stageThreshold } from './content.js';
+import { INJECTORS, NOVA_INJECTORS, UPGRADES, STAGES, PERKS, ACHIEVEMENTS, BOONS, getStage, stageThreshold } from './content.js';
 import { TUNE } from './tune.js';
 import { clamp, mulberry32 } from './math.js';
 import { EVT } from './events.js';
@@ -15,7 +15,10 @@ const ACH_INTERVAL = 0.25; // checkAchievements runs from tick() at most 4x per 
 
 // ---------------------------------------------------------------- content (defensive) ----
 const arr = (a) => (Array.isArray(a) ? a.filter((r) => r && typeof r === 'object' && typeof r.id === 'string') : []);
-const INJ = arr(INJECTORS);
+// One registry for both families. `family` defaults to 'base' when absent, so every existing
+// code path (cost, rate, reset, save) treats nova rows exactly like base rows.
+const INJ = [...arr(INJECTORS), ...arr(NOVA_INJECTORS)]
+  .map((r) => (r.family === 'nova' ? r : { ...r, family: 'base' }));
 const UPG = arr(UPGRADES);
 const STG = arr(STAGES);
 const PRK = arr(PERKS);
@@ -226,11 +229,17 @@ function injectorMult(state, id) {
   }
   return fin(m, 1);
 }
+/** Nova-family multiplier: 1 + cores * TUNE.prestige.novaPerCore. Base family never gets it. */
+export function novaMult(state) {
+  const per = num(TUNE.prestige && TUNE.prestige.novaPerCore, 0);
+  return Math.max(1, fin(1 + Math.max(0, fin(state.cores)) * per, 1));
+}
 function injectorRateInner(state, id, gm) {
   const inj = INJ_BY_ID.get(id);
   if (!inj) return 0;
   const owned = Math.max(0, fin(state.injectors && state.injectors[id]));
-  return Math.max(0, fin(owned * num(inj.baseRate, 0) * injectorMult(state, id) * gm));
+  const fam = inj.family === 'nova' ? novaMult(state) : 1;
+  return Math.max(0, fin(owned * num(inj.baseRate, 0) * injectorMult(state, id) * fam * gm));
 }
 /** Total flux/s produced by that injector kind, all multipliers included. */
 export function injectorRate(state, id) {
@@ -245,7 +254,14 @@ function totalRateInner(state, includeOverdrive) {
 export function totalRate(state) {
   return totalRateInner(state, true);
 }
+// A family is visible (listed in the snapshot) once its gate is met: base always, nova from the
+// first ascend. Within a visible family an injector unlocks on its own `requires` (ascend count,
+// which never resets) plus the usual current-run flux threshold.
+function familyVisible(state, inj) {
+  return inj.family !== 'nova' || fin(state.ascends) >= 1;
+}
 function injectorUnlocked(state, inj) {
+  if (!familyVisible(state, inj) || !meets(state, inj.requires)) return false;
   return fin(state.injectors[inj.id]) > 0 || fin(state.totalFlux) >= num(inj.unlockAt, 0);
 }
 
@@ -461,6 +477,8 @@ function resetRun(state) {
   const t = tr(state);
   t.autoAcc = 0;
 }
+// resetRun zeroes every injector of BOTH families (nova rows are in INJ), so collapse and
+// ascend reset the nova family exactly like the base one.
 /** Layer 1: reset flux/injectors/upgrades, keep stage (totalFlux), gain Shards. */
 export function doCollapse(state, bus) {
   const gained = shardsFor(state);
@@ -635,11 +653,14 @@ export function snapshot(state) {
   const progress = next ? clamp(fin((fin(state.lifetimeFlux) - curAt) / Math.max(1e-9, nextAt - curAt)), 0, 1) : 1;
   const pal = s && s.palette && typeof s.palette === 'object' ? { ...s.palette } : {};
 
-  const injectors = INJ.map((inj) => {
+  // Nova rows appear only once the family is visible (first ascend), so a fresh game lists
+  // exactly the base family; the HUD teases the locked NOVA section from the content table.
+  const injectors = INJ.filter((inj) => familyVisible(state, inj)).map((inj) => {
     const cost = injectorCost(state, inj.id);
     const unlocked = injectorUnlocked(state, inj);
     return {
-      id: inj.id, name: inj.name, tier: num(inj.tier, 0),
+      id: inj.id, name: inj.name, tier: num(inj.tier, 0), family: inj.family,
+      requiresAscends: num(inj.requires && inj.requires.ascends, 0),
       owned: fin(state.injectors[inj.id]), cost, unlockAt: num(inj.unlockAt, 0),
       rate: injectorRateInner(state, inj.id, gm),
       affordable: unlocked && flux >= cost, unlocked, blurb: inj.blurb || '',

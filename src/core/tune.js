@@ -30,6 +30,7 @@ export const TUNE = {
     ascendAt: 1e12,
     coreExp: 0.4,
     coreGainPct: 0.15,    // (1.15)^cores
+    novaPerCore: 0.08,    // nova family only: x(1 + cores * novaPerCore)
   },
   pulse: {
     base: 1,

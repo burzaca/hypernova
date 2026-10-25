@@ -148,6 +148,20 @@
 }
 .locked-ghost[hidden] { display: none; }
 
+/* NOVA — the second injector family (docs/SECOND_FAMILY.md). Violet so it never reads as more of
+   the amber base list; same row grid, so the shop stays one scannable column. */
+.nova-section { margin-top: 6px; border-top: 1px solid rgba(190, 140, 255, 0.45); }
+.nova-title { color: #c9a2ff; letter-spacing: 0.22em; padding: 6px 10px 0; }
+.nova-note, .nova-bonus { padding: 2px 10px 4px; font-size: 11px; line-height: 1.35; color: var(--hn-dim); }
+.nova-bonus { font-family: ui-monospace, monospace; color: #c9a2ff; padding-top: 0; }
+.nova-bonus[hidden] { display: none; }
+.nova-row { background: rgba(150, 90, 255, 0.07); }
+.nova-row .inj-name, .nova-row .inj-rate { color: #d8bcff; }
+.nova-row[data-affordable="1"] { box-shadow: inset 3px 0 0 #a66bff; }
+.nova-row[data-affordable="1"] .inj-cost { color: #e6d4ff; }
+.nova-row[data-affordable="1"]:active { background: rgba(150, 90, 255, 0.24); }
+.nova-ghost { border-color: rgba(190, 140, 255, 0.4); color: #b79be0; }
+
 /* ------------------------------------------------------------ toasts */
 .toasts {
   flex: none;

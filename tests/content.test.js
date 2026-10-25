@@ -2,9 +2,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  INJECTORS, UPGRADES, STAGES, PERKS, ACHIEVEMENTS, MECHANIC_KEYS, BOONS, getStage, stageThreshold, GEN_STEP,
+  INJECTORS, NOVA_INJECTORS, UPGRADES, STAGES, PERKS, ACHIEVEMENTS, MECHANIC_KEYS, BOONS, getStage, stageThreshold, GEN_STEP,
 } from '../src/core/content.js';
-import { createState, save, load, snapshot, tick, stageFor } from '../src/core/economy.js';
+import {
+  createState, save, load, snapshot, tick, stageFor, injectorRate, globalMult, buyInjector, doCollapse, novaMult,
+} from '../src/core/economy.js';
+import { TUNE } from '../src/core/tune.js';
 
 const HEX = /^#[0-9a-f]{6}$/;
 const ID = /^[a-z][a-z0-9_]*$/;
@@ -212,4 +215,99 @@ test('boon table: 12+ trades, unique ids, known keys only, every boon has a cost
     // fluxMult cannot be the cost side of a boon.
     if ('fluxMult' in b.mods) assert.ok(b.mods.fluxMult >= 1, 'fluxMult must be >= 1 on ' + b.id);
   }
+});
+
+// ---------------------------------------------------------------- nova family (SECOND_FAMILY.md)
+test('nova family: 6 tiers above the base family, unique ids, same row shape', () => {
+  assert.ok(Array.isArray(NOVA_INJECTORS));
+  assert.equal(NOVA_INJECTORS.length, 6, 'exactly 6 nova injectors');
+  const others = new Set([INJECTORS, UPGRADES, STAGES, PERKS, ACHIEVEMENTS, BOONS].flat().map((r) => r.id));
+  const seen = new Set();
+  const topBaseTier = Math.max(...INJECTORS.map((i) => i.tier));
+  const baseKeys = new Set(Object.keys(INJECTORS[0]));
+  for (const n of NOVA_INJECTORS) {
+    assert.match(n.id, ID, 'bad id ' + n.id);
+    assert.ok(!seen.has(n.id) && !others.has(n.id), 'duplicate id ' + n.id);
+    seen.add(n.id);
+    assert.equal(n.family, 'nova', 'family on ' + n.id);
+    assert.ok(n.tier > topBaseTier, 'tier must exceed every base tier: ' + n.id);
+    assert.ok(n.requires && Number.isInteger(n.requires.ascends) && n.requires.ascends >= 1, 'requires.ascends on ' + n.id);
+    assert.ok(typeof n.name === 'string' && n.name.length > 1 && n.name.length < 40, 'name for ' + n.id);
+    assert.ok(typeof n.blurb === 'string' && n.blurb.length > 8, 'blurb for ' + n.id);
+    for (const k of Object.keys(n)) {
+      assert.ok(baseKeys.has(k) || k === 'family' || k === 'requires', 'invented field ' + k + ' on ' + n.id);
+    }
+    for (const k of baseKeys) assert.ok(k in n, 'missing field ' + k + ' on ' + n.id);
+  }
+  for (const b of INJECTORS) assert.ok(b.family === undefined || b.family === 'base', 'base rows stay base');
+});
+
+test('nova curve: cost and rate rise with tier; cost growth steeper than any base entry', () => {
+  const steepestBase = Math.max(...INJECTORS.map((i) => i.costGrowth));
+  NOVA_INJECTORS.forEach((n, i) => {
+    assert.ok(Number.isFinite(n.baseCost) && n.baseCost > 0, 'baseCost ' + n.id);
+    assert.ok(Number.isFinite(n.baseRate) && n.baseRate > 0, 'baseRate ' + n.id);
+    assert.ok(n.costGrowth > steepestBase, 'costGrowth must beat ' + steepestBase + ': ' + n.id);
+    if (i > 0) {
+      const prev = NOVA_INJECTORS[i - 1];
+      assert.ok(n.tier > prev.tier, 'tier must rise: ' + n.id);
+      assert.ok(n.baseCost > prev.baseCost, 'cost must rise: ' + n.id);
+      assert.ok(n.baseRate > prev.baseRate, 'rate must rise: ' + n.id);
+      assert.ok(n.requires.ascends >= prev.requires.ascends, 'ascend gate must not fall: ' + n.id);
+    }
+  });
+});
+
+test('nova rate: no hidden bonus at 0 cores, exact novaPerCore scaling at 10, base untouched', () => {
+  const nova = NOVA_INJECTORS[0];
+  const base = INJECTORS[3];
+  const st = createState(1);
+  st.ascends = 1;
+  st.injectors[nova.id] = 1;
+  st.injectors[base.id] = 1;
+  const gm0 = globalMult(st);
+  assert.equal(novaMult(st), 1);
+  assert.equal(injectorRate(st, nova.id), nova.baseRate * gm0, 'cores=0 => baseRate * globalMult');
+  const baseAt0 = injectorRate(st, base.id) / gm0;
+
+  st.cores = 10;
+  const gm10 = globalMult(st);
+  const want = 1 + 10 * TUNE.prestige.novaPerCore;
+  assert.ok(Math.abs(novaMult(st) - want) < 1e-12);
+  const ratio = (injectorRate(st, nova.id) / gm10) / nova.baseRate;
+  assert.ok(Math.abs(ratio - want) < 1e-9, 'nova rate x' + ratio + ', want x' + want);
+  assert.ok(Math.abs(injectorRate(st, base.id) / gm10 - baseAt0) < 1e-9, 'base family must not get the nova bonus');
+});
+
+test('nova is not offered before the first ascend, and is after it', () => {
+  const fresh = createState(1);
+  fresh.flux = 1e30; fresh.totalFlux = 1e30;
+  const s0 = snapshot(fresh);
+  assert.ok(!s0.injectors.some((i) => i.family === 'nova'), 'fresh state lists no nova row');
+  for (const n of NOVA_INJECTORS) assert.equal(buyInjector(fresh, null, n.id), false, 'cannot buy ' + n.id + ' at 0 ascends');
+
+  const st = createState(1);
+  st.ascends = 1;
+  st.flux = 1e6;
+  const s1 = snapshot(st);
+  const offered = s1.injectors.filter((i) => i.family === 'nova' && i.unlocked);
+  assert.ok(offered.length >= 1, 'one ascend unlocks at least the first nova tier');
+  assert.ok(s1.injectors.filter((i) => i.family === 'base').length === INJECTORS.length, 'base family still listed');
+  for (const i of s1.injectors.filter((x) => x.family === 'nova')) {
+    const row = NOVA_INJECTORS.find((n) => n.id === i.id);
+    if (row.requires.ascends > 1) assert.equal(i.unlocked, false, 'deeper tier waits for more ascends: ' + i.id);
+  }
+  assert.equal(buyInjector(st, null, NOVA_INJECTORS[0].id), true);
+  assert.equal(st.injectors[NOVA_INJECTORS[0].id], 1);
+});
+
+test('nova injectors reset on prestige and survive save/load', () => {
+  const st = createState(1);
+  st.ascends = 1;
+  st.injectors[NOVA_INJECTORS[0].id] = 4;
+  const back = load(save(st));
+  assert.equal(back.injectors[NOVA_INJECTORS[0].id], 4);
+  st.runFlux = 1e8;
+  doCollapse(st, null);
+  for (const n of NOVA_INJECTORS) assert.equal(st.injectors[n.id], 0, 'collapse resets ' + n.id);
 });

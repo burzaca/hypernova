@@ -7,10 +7,12 @@ import { TUNE } from '../core/tune.js';
 import { EVT } from '../core/events.js';
 // Static data lookup only (names + `requires`): the snapshot carries neither upgrade/perk
 // requirements nor injector names for requirement text, so D6 needs the content tables.
-import { INJECTORS, UPGRADES, PERKS } from '../core/content.js';
+import { INJECTORS, NOVA_INJECTORS, UPGRADES, PERKS } from '../core/content.js';
 
-const INJ_NAME = new Map(INJECTORS.map((i) => [i.id, i.name]));
-const ALL_UPGRADE_IDS = UPGRADES.map((u) => u.id);
+const INJ_NAME = new Map([...INJECTORS, ...NOVA_INJECTORS].map((i) => [i.id, i.name]));
+const NOVA_IDS = new Set(NOVA_INJECTORS.map((i) => i.id));
+const NOVA_NOTE = 'Nova producers scale with your Nova Cores. They reset on prestige like the rest.';
+const NOVA_TIP = ' Output x(1 + cores x ' + (TUNE.prestige.novaPerCore || 0) + '). Collapse and ascend reset it like every injector.';
 const REQ = new Map([...UPGRADES, ...PERKS].map((u) => [u.id, u.requires || null]));
 const LOCKED_UPGRADES_SHOWN = 3;
 const TOAST_SLOTS = 4;
@@ -99,9 +101,10 @@ function collapseLossText(snap) {
     if (o > 0) { n += 1; levels += o; }
   }
   const listed = Array.isArray(snap.upgrades) ? snap.upgrades : [];
-  const present = new Set(listed.map((u) => u && u.id));
-  let u = listed.filter((x) => x && x.owned === true).length;
-  if (Array.isArray(snap.upgrades)) for (const id of ALL_UPGRADE_IDS) if (!present.has(id)) u += 1;
+  // Count only what the snapshot says is owned. An earlier version counted ids that were *absent*
+  // from the snapshot as owned, which is backwards: with a partial or empty list it claimed the
+  // whole upgrade table would be lost. Unknown is not the same as owned.
+  const u = listed.filter((x) => x && x.owned === true).length;
   if (n === 0 && u === 0) return 'nothing to lose yet';
   return 'resets ' + formatNumber(n) + ' injectors (' + formatNumber(levels) + ' levels) · ' + formatNumber(u) + ' upgrades';
 }
@@ -134,7 +137,16 @@ export function createHUD(root, bus, api) {
   const shopList = el('div', 'shop-list');
   const lockedGhost = el('div', 'locked-ghost');
   lockedGhost.hidden = true;
-  shop.append(el('div', 'panel-title', 'INJECTORS'), shopList, lockedGhost);
+  // Second family (docs/SECOND_FAMILY.md): its own subheading, always shown so a player sees from
+  // the shop alone that it exists, that ASCEND opens it, and that Nova Cores feed it.
+  const novaSection = el('div', 'nova-section');
+  const novaNote = el('div', 'nova-note', NOVA_NOTE);
+  const novaBonus = el('div', 'nova-bonus', '');
+  novaBonus.hidden = true;
+  const novaList = el('div', 'shop-list nova-list');
+  const novaGhost = el('div', 'locked-ghost nova-ghost', 'LOCKED until your first ASCEND');
+  novaSection.append(el('div', 'sub-title nova-title', 'NOVA'), novaNote, novaBonus, novaList, novaGhost);
+  shop.append(el('div', 'panel-title', 'INJECTORS'), shopList, lockedGhost, novaSection);
 
   // toasts
   const toasts = el('div', 'toasts');
@@ -270,8 +282,11 @@ export function createHUD(root, bus, api) {
   function injRow(inj) {
     let r = injRows.get(inj.id);
     if (r) return r;
-    const row = el('div', 'injector-row');
+    const nova = inj.family === 'nova' || NOVA_IDS.has(inj.id);
+    const row = el('div', nova ? 'injector-row nova-row' : 'injector-row');
     row.dataset.injector = inj.id;
+    if (nova) row.dataset.family = 'nova';
+    if (nova) row.title = (inj.blurb ? inj.blurb + ' ' : '') + NOVA_TIP.trim();
     row.dataset.affordable = '0';
     row.setAttribute('role', 'button');
     row.tabIndex = 0;
@@ -280,7 +295,7 @@ export function createHUD(root, bus, api) {
     const cost = el('span', 'inj-cost', '');
     const rate = el('span', 'inj-rate', '');
     row.append(name, owned, rate, cost);
-    shopList.appendChild(row);
+    (nova ? novaList : shopList).appendChild(row);
     r = { row, name, owned, cost, rate };
     injRows.set(inj.id, r);
     return r;
@@ -510,6 +525,12 @@ export function createHUD(root, bus, api) {
     const snap = latest;
     if (!snap) return;
 
+    // Degrade, never crash: a snapshot without an optional section renders without it. main.js
+    // already keeps a HUD fault from killing the game, but a missing section should not even log.
+    if (!snap.collapse) snap.collapse = { available: false, shards: 0 };
+    if (!snap.ascend) snap.ascend = { available: false, cores: 0 };
+    if (!snap.boons) snap.boons = { offers: [], owned: [], pending: false };
+
     // palette -> CSS vars (only when the stage changes)
     const pal = snap.stage && snap.stage.palette;
     const palKey = pal ? (pal.core || '') + (pal.glow || '') + (pal.accent || '') : '';
@@ -536,11 +557,15 @@ export function createHUD(root, bus, api) {
 
     // injectors (D1, D2)
     let nextLocked = null;
+    let nextNova = null;
+    let novaListed = 0;
     for (const inj of snap.injectors) {
       const r = injRow(inj);
+      const nova = inj.family === 'nova' || NOVA_IDS.has(inj.id);
+      if (nova) novaListed += 1;
       if (!inj.unlocked) {
         setHidden(r.row, true);
-        if (!nextLocked) nextLocked = inj;
+        if (nova) { if (!nextNova) nextNova = inj; } else if (!nextLocked) nextLocked = inj;
         continue;
       }
       setHidden(r.row, false);
@@ -553,6 +578,24 @@ export function createHUD(root, bus, api) {
       setHidden(lockedGhost, false);
       setText(lockedGhost, 'LOCKED at ' + formatNumber(nextLocked.unlockAt) + ' flux');
     } else setHidden(lockedGhost, true);
+    // NOVA: before the first ascend the snapshot lists no nova rows at all.
+    const asc = Number(snap.ascends) || 0;
+    const cores = Number(snap.cores) || 0;
+    setHidden(novaBonus, novaListed === 0);
+    if (novaListed > 0) {
+      setText(novaBonus, 'now ' + formatMult(1 + cores * (TUNE.prestige.novaPerCore || 0)) + ' from '
+        + formatNumber(cores) + (cores === 1 ? ' Nova Core' : ' Nova Cores'));
+    }
+    if (novaListed === 0) {
+      setHidden(novaGhost, false);
+      setText(novaGhost, 'LOCKED until your first ASCEND');
+    } else if (nextNova) {
+      setHidden(novaGhost, false);
+      const need = Number(nextNova.requiresAscends) || 0;
+      setText(novaGhost, need > asc
+        ? 'next: LOCKED until ASCEND #' + formatNumber(need)
+        : 'next: LOCKED at ' + formatNumber(nextNova.unlockAt) + ' flux');
+    } else setHidden(novaGhost, true);
 
     // upgrades (D6): unlocked rows live, next three locked rows greyed with requirement
     const upgList = Array.isArray(snap.upgrades) ? snap.upgrades : [];

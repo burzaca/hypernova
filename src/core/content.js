@@ -13,6 +13,23 @@ export const INJECTORS = [
   { id: 'vacuum_tap', name: 'Vacuum Tap', tier: 11, baseCost: 1.5e13, costGrowth: 1.19, baseRate: 6.5e7, unlockAt: 1.2e13, blurb: 'Drinking the void to feed a light that outshines its own death.' },
 ];
 
+// ---------------------------------------------------------------- nova family -----------
+// The second injector family (docs/SECOND_FAMILY.md). Same row shape as INJECTORS plus
+// `family: 'nova'` and `requires.ascends` — it does not exist until the first ASCEND, deeper
+// tiers want more ascends, and its output is multiplied by 1 + cores * TUNE.prestige.novaPerCore
+// (economy.novaMult). Per unit it out-earns the base tier at the same price (~3x at the bottom,
+// ~8x at the top), but every copy costs 21-26% more than the last (base family: 15-19%), so it
+// is a handful of strong pieces, not a second wall of 100 identical buys. unlockAt works exactly
+// like the base family (current-run totalFlux), so each ascend re-reveals the family in order.
+export const NOVA_INJECTORS = [
+  { id: 'nova_cinder', name: 'Remnant Cinder', tier: 12, family: 'nova', baseCost: 2000, costGrowth: 1.21, baseRate: 50, unlockAt: 0, requires: { ascends: 1 }, blurb: 'The ember of the star you gave up, still warm and still feeding the new one.' },
+  { id: 'nova_halo', name: 'Echo Halo', tier: 13, family: 'nova', baseCost: 80000, costGrowth: 1.22, baseRate: 900, unlockAt: 40000, requires: { ascends: 1 }, blurb: 'A ring of light left over from your last ascension, orbiting where the old star stood.' },
+  { id: 'nova_choir', name: 'Core Choir', tier: 14, family: 'nova', baseCost: 4e6, costGrowth: 1.23, baseRate: 18000, unlockAt: 2e6, requires: { ascends: 2 }, blurb: 'Every Nova Core you hold hums the same note, and the note becomes flux.' },
+  { id: 'nova_prism', name: 'Afterlight Prism', tier: 15, family: 'nova', baseCost: 2.5e8, costGrowth: 1.24, baseRate: 2e5, unlockAt: 1.2e8, requires: { ascends: 2 }, blurb: 'Splits the glow of past ascensions into beams the present star can drink.' },
+  { id: 'nova_furnace', name: 'Rebirth Furnace', tier: 16, family: 'nova', baseCost: 1.6e10, costGrowth: 1.25, baseRate: 4e6, unlockAt: 8e9, requires: { ascends: 3 }, blurb: 'Burns the memory of dead stars so the living one never has to start cold.' },
+  { id: 'nova_heart', name: 'Ascendant Heart', tier: 17, family: 'nova', baseCost: 1e12, costGrowth: 1.26, baseRate: 8e7, unlockAt: 5e11, requires: { ascends: 3 }, blurb: 'The heart of every star you ever ascended, beating as one inside the core.' },
+];
+
 export const STAGES = [
   { id: 'spark', name: 'SPARK', at: 0, detail: 1, bloom: 0.35, orbit: 1.0, camDist: 6.0, palette: { core: '#ffd9a0', glow: '#ff7a1a', rim: '#fff3c4', bg: '#0a0705', accent: '#ffb347' }, blurb: 'A single ember in the void — the beginning of the feast.' },
   { id: 'ember', name: 'EMBER', at: 11000, detail: 1, bloom: 0.5, orbit: 1.1, camDist: 6.2, palette: { core: '#ffaa66', glow: '#ff8800', rim: '#ffe6c2', bg: '#0d0803', accent: '#ffaa44' }, blurb: 'Warm amber fills the chamber as the first currents wake.' },
