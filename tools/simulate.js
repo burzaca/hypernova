@@ -13,6 +13,11 @@ const SEED = Number(process.argv[3] || 42);
 const MAXS = Number(process.argv[4] || 3600);
 // Optional 5th arg: pulse rate, used to calibrate the bot against a real player's report.
 const PULSE = Number(process.argv[5] || TUNE.sim.botPulseRate);
+// Optional 6th arg: 'ignore' leaves boons pending (the original gate), 'choose' plays them.
+// A real player always takes one, so endgame pacing must be measured WITH them. The pick is
+// deliberately random rather than optimal: an optimal bot would flatter the balance and hide the
+// fact that some trades are traps.
+const BOONS = (process.argv[6] || 'choose') === 'choose';
 const DT = TUNE.sim.dt;
 
 // How the bot plays, and why: a real incremental player buys the HIGHEST tier they can afford
@@ -109,6 +114,19 @@ function run(seed, maxSeconds) {
     if (eco.canAscend(s)) {
       s = eco.doAscend(s, bus);
       if (t.firstAscend === null) t.firstAscend = clock;
+      // Every ascend offers a boon, so the gap between ascends IS the novelty cadence. The first
+      // ascend is covered by firstAscendMin/Max, so only gaps AFTER it count here.
+      if (t.lastAscendAt) t.maxAscendGap = Math.max(t.maxAscendGap || 0, clock - t.lastAscendAt);
+      t.lastAscendAt = clock;
+    }
+    // Take a boon when one is offered, like a player who wants the free rule change.
+    if (BOONS) {
+      const snapB = eco.snapshot(s);
+      const offers = snapB.boons && snapB.boons.offers ? snapB.boons.offers : [];
+      if (offers.length) {
+        const pick = offers[Math.floor(rng() * offers.length) % offers.length];
+        if (eco.chooseBoon(s, bus, pick.id)) t.boons = (t.boons || 0) + 1;
+      }
     }
 
     eco.tick(s, DT, bus);
@@ -164,6 +182,10 @@ for (let i = 0; i < RUNS; i++) {
     const reached = t.stageTimes[minStages]?.t;
     chk(`stage ${minStages} ${fmt(reached)} later than ${atSec}s`, reached !== undefined && reached <= atSec);
   }
+  if (PACING.boonGapMax && t.ascends >= 2) {
+    chk(`longest stretch with no new boon offered ${fmt(t.maxAscendGap)} > ${PACING.boonGapMax}s`,
+      (t.maxAscendGap || 0) <= PACING.boonGapMax);
+  }
 }
 
 console.log(`HYPERNOVA balance sim — runs=${RUNS} seed=${SEED} maxSeconds=${MAXS}`);
@@ -180,11 +202,16 @@ rows.forEach((t, i) => {
 });
 
 if (rows[0] && rows[0].stageTimes) {
-  console.log('\nstage ladder as reached by run 1 (this is what the player sees):');
+  console.log(`\nstage ladder as reached by run 1 (boons: ${BOONS ? 'chosen' : 'ignored'}) — this is what the player sees:`);
   const st = rows[0].stageTimes;
+  let prev = null;
   for (const k of Object.keys(st).map(Number).sort((a, b) => a - b)) {
-    console.log(`  stage ${String(k).padStart(2)}  at ${fmt(st[k].t).padStart(8)}   lifetimeFlux ${formatNumber(st[k].life)}`);
+    const gap = prev === null ? '' : `  (+${fmt(st[k].t - prev).trim()})`;
+    console.log(`  stage ${String(k).padStart(2)}  at ${fmt(st[k].t).padStart(8)}${gap.padEnd(12)}  lifetimeFlux ${formatNumber(st[k].life)}`);
+    prev = st[k].t;
   }
+  if (rows[0].boons) console.log(`  boons taken: ${rows[0].boons}`);
+  if (rows[0].maxAscendGap) console.log(`  longest stretch with no new boon offered: ${fmt(rows[0].maxAscendGap)} (novelty cadence)`);
 }
 
 if (failures.length) {

@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  INJECTORS, UPGRADES, STAGES, PERKS, ACHIEVEMENTS, MECHANIC_KEYS, BOONS, getStage, stageThreshold,
+  INJECTORS, UPGRADES, STAGES, PERKS, ACHIEVEMENTS, MECHANIC_KEYS, BOONS, getStage, stageThreshold, GEN_STEP,
 } from '../src/core/content.js';
 import { createState, save, load, snapshot, tick, stageFor } from '../src/core/economy.js';
 
@@ -147,7 +147,7 @@ test('stageThreshold is strictly increasing across the authored/generated bounda
   const last = STAGES.length - 1;
   for (let i = 0; i <= last; i++) assert.equal(stageThreshold(i), STAGES[i].at);
   assert.ok(stageThreshold(15) > STAGES[14].at);
-  assert.equal(stageThreshold(last + 1), STAGES[last].at * 10);
+  assert.equal(stageThreshold(last + 1), STAGES[last].at * GEN_STEP);
   for (let i = 1; i <= 120; i++) {
     assert.ok(stageThreshold(i) > stageThreshold(i - 1), 'threshold must rise at ' + i);
     assert.equal(stageThreshold(i), getStage(i).at);
@@ -176,10 +176,14 @@ test('a save at stage 30 round-trips and keeps stage 30', () => {
   assert.ok(snap.stage.progress > 0 && snap.stage.progress < 1);
 });
 
-test('the advance loop climbs past the last authored stage', () => {
+test('the advance loop climbs past the last authored stage, at most 3 forms per tick', () => {
   const st = createState(3);
   st.lifetimeFlux = stageThreshold(22) * 2;
   tick(st, 0.1, null);
+  // One tick may fire at most 3 forms: an ascend can multiply lifetime flux by 1e5 at once, and
+  // 15 forms in one frame is a dropped frame, not a spectacle. The cascade finishes over later ticks.
+  assert.equal(st.stageIndex, 3);
+  for (let i = 0; i < 40; i++) tick(st, 0.1, null);
   assert.equal(st.stageIndex, 22);
 });
 

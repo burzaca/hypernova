@@ -69,4 +69,9 @@ export const PACING = {
   // Measured with tools/fit-stages.js, then given ~30% slack so the contract cannot drift into
   // being tighter than the design intent.
   minStagesBy: [[90, 4], [700, 8], [1200, 10]],
+  // Anti-repetition guarantee: every ascend offers a new boon, so the gap between ascends is how
+  // long a player can go without the rules changing. Measured worst case over 4 h on seeds
+  // 42/777/12345 at 6 CPS: 18m41s. The limit is set at ~2x that so a real regression trips CI
+  // without the check being brittle.
+  boonGapMax: 2400,
 };

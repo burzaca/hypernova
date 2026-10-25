@@ -382,11 +382,17 @@ export function stageFor(state) {
   return getStage(fin(state.stageIndex));
 }
 function checkStage(state, bus) {
-  // Endless: one generated stage per decade of lifetime flux. The strict-increase guard stops
-  // the loop once thresholds saturate at Number.MAX_VALUE.
-  while (fin(state.lifetimeFlux) >= stageThreshold(state.stageIndex + 1)
+  // Endless: one generated stage per GEN_STEP of lifetime flux. The strict-increase guard stops
+  // the loop once thresholds saturate at Number.MAX_VALUE. At most 3 forms per tick: an ascend can
+  // multiply lifetime flux by 1e5 in one step, and 15 forms firing in the same frame is not a
+  // spectacle, it is a dropped frame. The rest land on the following ticks (milliseconds apart),
+  // which reads as a cascade.
+  let advanced = 0;
+  while (advanced < 3
+    && fin(state.lifetimeFlux) >= stageThreshold(state.stageIndex + 1)
     && stageThreshold(state.stageIndex + 1) > stageThreshold(state.stageIndex)) {
     state.stageIndex += 1;
+    advanced += 1;
     const s = getStage(state.stageIndex);
     emit(bus, EVT.STAGE_UP, { index: state.stageIndex, id: s.id, name: s.name });
   }

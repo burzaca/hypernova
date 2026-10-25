@@ -174,10 +174,17 @@ const toIndex = (index) => (Number.isFinite(index) && index > 0 ? Math.floor(ind
 
 /** Flux threshold of stage `index` (any index >= 0). Strictly increasing while finite; capped at
  *  Number.MAX_VALUE so it never returns a non-finite number. */
+// Generated forms step by this factor per index. Measured, not guessed: at the top of the ladder
+// the bot's lifetime flux grows ~1 decade / 80-100 min, so a x10 step means one new star form
+// every 1.5 h (a drought), while a x4 step brings it to ~50 min without making the form cheap.
+// The fast novelty engine is Ascension Boons (one offered per ascend, ~15-20 min apart), which is
+// why this number is deliberately conservative. See tools/simulate.js stage report.
+export const GEN_STEP = 4;
+
 export function stageThreshold(index) {
   const i = toIndex(index);
   if (i <= LAST) return STAGES[i].at;
-  const at = STAGES[LAST].at * Math.pow(10, i - LAST);
+  const at = STAGES[LAST].at * Math.pow(GEN_STEP, i - LAST);
   return Number.isFinite(at) ? at : Number.MAX_VALUE;
 }
 
